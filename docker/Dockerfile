@@ -5,7 +5,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         espeak-ng espeak-ng-data git \
     && rm -rf /var/lib/apt/lists/*
 
-COPY constraints.txt /etc/pip-constraints.txt
+# Ràng buộc áp cho MỌI lệnh pip phía dưới. tritonserver và cupy trong image nền
+# đều yêu cầu numpy<2, còn torch 2.5.1 thì biên dịch với numpy 1.x. Không ghim
+# thì lhotse kéo numpy 2.x lên và Python backend vỡ ngay lúc truyền tensor.
+# Viết thẳng vào đây thay vì COPY một file rời - đỡ phụ thuộc build context.
+RUN echo "numpy<2" > /etc/pip-constraints.txt
 ENV PIP_CONSTRAINT=/etc/pip-constraints.txt
 
 # Ghim torch/torchaudio TRƯỚC khi cài ZipVoice.

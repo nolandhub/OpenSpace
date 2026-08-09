@@ -264,4 +264,4 @@ Ghi lại để không quên, không làm ở vòng này:
 
 - Giải thích tập trung ở mức `config.pbtxt` và kiến trúc. Code Python là đường ống, không mổ từng dòng.
 - File code mở đầu bằng 2 dòng `# ABOUTME:` theo quy ước chung.
-- Comment trong code viết bằng tiếng Việt.
+- **Ngôn ngữ trong code:** mọi identifier viết bằng **tiếng Anh** — tên hàm, tên biến, tên tham số, tên hàm test, khoá dict, hằng số. **Comment và docstring viết bằng tiếng Việt.** Không có ngoại lệ; một comment tiếng Việt giải thích hàm tên tiếng Anh là đúng chuẩn, ngược lại là sai.

@@ -1,6 +1,6 @@
 tritonclient[grpc]==2.53.0
 soundfile==0.12.1
-numpy<2
+numpy==1.26.4
 pytest==8.3.4
 onnx==1.17.0
 scipy==1.14.1

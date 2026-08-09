@@ -16,7 +16,9 @@ Mọi task đều phải tuân thủ những ràng buộc dưới đây.
 - **Phần cứng:** RTX 3050, 4GB VRAM. Mọi cấu hình phải vừa trong 4GB.
 - **Cổng:** 8000 HTTP, 8001 gRPC, 8002 metrics. Container chạy `--net host`.
 - **Mọi file code (`.py`, `.sh`) mở đầu bằng đúng 2 dòng `# ABOUTME:`** mô tả file đó làm gì.
-- **Comment trong code viết bằng tiếng Việt.**
+- **Ngôn ngữ trong code:** identifier viết **tiếng Anh** (tên hàm, biến, tham số, hàm test, khoá dict, hằng số); comment và docstring viết **tiếng Việt**.
+
+> **Lưu ý khi đọc plan này:** một số khối code bên dưới còn đặt tên identifier bằng tiếng Việt — đó là lỗi của bản nháp, đã sửa hết trong code thật. Khi có khác biệt, **lấy file trong repo làm chuẩn**, không lấy plan.
 - **Không commit trọng số.** `*.onnx`, `*.pt`, `*.plan`, `*.bin` đã nằm trong `.gitignore`.
 - **Hằng số dùng chung — dùng đúng những giá trị này ở mọi nơi:**
   - `SAMPLE_RATE = 16000` (đầu vào ASR)
@@ -82,13 +84,7 @@ scipy==1.14.1
 
 - [ ] **Step 2: Viết `docker/Dockerfile`**
 
-Cần thêm `docker/constraints.txt`:
-
-```
-numpy<2
-```
-
-`docker/Dockerfile`:
+`docker/Dockerfile` — thư mục `docker/` chỉ chứa đúng file này, không cần file phụ nào:
 
 ```dockerfile
 FROM nvcr.io/nvidia/tritonserver:25.01-py3
@@ -98,7 +94,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         espeak-ng espeak-ng-data git \
     && rm -rf /var/lib/apt/lists/*
 
-COPY constraints.txt /etc/pip-constraints.txt
+RUN echo "numpy<2" > /etc/pip-constraints.txt
 ENV PIP_CONSTRAINT=/etc/pip-constraints.txt
 
 # Ghim torch/torchaudio TRƯỚC khi cài ZipVoice.

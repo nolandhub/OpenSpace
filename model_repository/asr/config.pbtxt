@@ -1,0 +1,52 @@
+name: "asr"
+platform: "ensemble"
+max_batch_size: 8
+
+input [
+  {
+    name: "WAV"
+    data_type: TYPE_FP32
+    dims: [-1]
+  },
+  {
+    name: "WAV_LEN"
+    data_type: TYPE_INT32
+    dims: [1]
+  }
+]
+
+output [
+  {
+    name: "TRANSCRIPT"
+    data_type: TYPE_STRING
+    dims: [1]
+  }
+]
+
+ensemble_scheduling {
+  step [
+    {
+      model_name: "asr_feature"
+      model_version: -1
+      input_map  { key: "WAV"        value: "WAV" }
+      input_map  { key: "WAV_LEN"    value: "WAV_LEN" }
+      output_map { key: "SPEECH"     value: "speech" }
+      output_map { key: "SPEECH_LEN" value: "speech_len" }
+    },
+    {
+      model_name: "asr_encoder"
+      model_version: -1
+      input_map  { key: "x"                value: "speech" }
+      input_map  { key: "x_lens"           value: "speech_len" }
+      output_map { key: "encoder_out"      value: "enc" }
+      output_map { key: "encoder_out_lens" value: "enc_len" }
+    },
+    {
+      model_name: "asr_scorer"
+      model_version: -1
+      input_map  { key: "ENCODER_OUT"     value: "enc" }
+      input_map  { key: "ENCODER_OUT_LEN" value: "enc_len" }
+      output_map { key: "TRANSCRIPT"      value: "TRANSCRIPT" }
+    }
+  ]
+}

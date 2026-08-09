@@ -1,0 +1,44 @@
+ Successfully read data for 1 stream/streams with 1 step/steps.
+*** Measurement Settings ***
+  Batch size: 1
+  Service Kind: TRITON
+  Using "time_windows" mode for stabilization
+  Stabilizing using p95latency and throughput
+  Measurement window: 20000 msec
+  Latency limit: 0 msec
+  Concurrency limit: 8 concurrent requests
+  Using synchronous calls for inference
+
+Request concurrency: 8
+  Client: 
+    Request count: 1726
+    Throughput: 23.829 infer/sec
+    p50 latency: 327724 usec
+    p90 latency: 362057 usec
+    p95 latency: 434014 usec
+    p99 latency: 584353 usec
+    Avg gRPC time: 334461 usec ((un)marshal request/response 96 usec + response wait 334365 usec)
+  Server: 
+    Inference count: 1726
+    Execution count: 1726
+    Successful request count: 1726
+    Avg request latency: 333385 usec (overhead 190 usec + queue 185307 usec + compute 147888 usec)
+
+  Composing models: 
+  asr_encoder, version: 1
+      Inference count: 1732
+      Execution count: 1464
+      Successful request count: 1732
+      Avg request latency: 61456 usec (overhead 70 usec + queue 14368 usec + compute input 153 usec + compute infer 46419 usec + compute output 445 usec)
+  asr_feature, version: 1
+      Inference count: 1733
+      Execution count: 1733
+      Successful request count: 1733
+      Avg request latency: 21519 usec (overhead 2 usec + queue 2550 usec + compute input 106 usec + compute infer 18746 usec + compute output 113 usec)
+  asr_scorer, version: 1
+      Inference count: 1726
+      Execution count: 1726
+      Successful request count: 1726
+      Avg request latency: 250294 usec (overhead 2 usec + queue 168389 usec + compute input 2365 usec + compute infer 79293 usec + compute output 243 usec)
+Inferences/Second vs. Client p95 Batch Latency
+Concurrency: 8, throughput: 23.829 infer/sec, latency 434014 usec

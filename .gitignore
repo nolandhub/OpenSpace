@@ -1,0 +1,15 @@
+# Trọng số model — tải bằng scripts/fetch_models.sh, không commit
+*.onnx
+*.pt
+*.plan
+*.bin
+
+# Kết quả benchmark
+bench/results/*.csv
+bench/results/*.png
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/

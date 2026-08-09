@@ -1,0 +1,70 @@
+name: "tts"
+backend: "python"
+max_batch_size: 0
+
+input [
+  {
+    name: "TEXT"
+    data_type: TYPE_STRING
+    dims: [1]
+  },
+  {
+    name: "PROMPT_WAV"
+    data_type: TYPE_FP32
+    dims: [-1]
+    optional: true
+  },
+  {
+    name: "PROMPT_TEXT"
+    data_type: TYPE_STRING
+    dims: [1]
+    optional: true
+  },
+  {
+    name: "NUM_STEPS"
+    data_type: TYPE_INT32
+    dims: [1]
+    optional: true
+  }
+]
+
+output [
+  {
+    name: "WAV"
+    data_type: TYPE_FP32
+    dims: [-1]
+  },
+  {
+    name: "SAMPLE_RATE"
+    data_type: TYPE_INT32
+    dims: [1]
+  }
+]
+
+instance_group [
+  {
+    kind: KIND_GPU
+    count: 1
+  }
+]
+
+# Tham số của ZipVoice. Bản "zipvoice" mặc định num_step=16/guidance_scale=1.0,
+# bản "zipvoice_distill" là 8/3.0 - đổi ở đây chứ không sửa code.
+parameters [
+  {
+    key: "model_name"
+    value: { string_value: "zipvoice" }
+  },
+  {
+    key: "lang"
+    value: { string_value: "vi" }
+  },
+  {
+    key: "num_step"
+    value: { string_value: "16" }
+  },
+  {
+    key: "guidance_scale"
+    value: { string_value: "1.0" }
+  }
+]

@@ -16,7 +16,7 @@
 - KHÔNG sửa model `asr`, `tts`, bench hiện có — chỉ đụng file liệt kê trong từng task
 - Test integration đánh dấu `@pytest.mark.integration`; `pytest -m "not integration"` phải chạy được không cần server
 - Server chạy qua `scripts/serve.sh` (docker, container tên `triton-voice-server`); health: `curl -sf localhost:8000/v2/health/ready`
-- Commit message tiếng Anh, kết thúc bằng dòng `Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>`
+- Commit message tiếng Anh, KHÔNG kèm bất kỳ trailer `Co-Authored-By` nào
 
 **Lệnh chạy chuẩn:** `PY=.venv/bin/python`, `PYTEST=.venv/bin/pytest` từ gốc repo.
 

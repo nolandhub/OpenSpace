@@ -34,7 +34,7 @@ Một lệnh sinh ra ma trận 5 component × 4 mức CCU × 7 metric, đủ đ�
 
 1. `python bench/bench.py e4` chạy xong không cần can thiệp tay, sinh `bench/results/matrix.csv` và `bench/results/matrix.md`
 2. Ma trận có đủ 20 dòng (5 component × CCU 1–4), mỗi dòng đủ P50/P90/P95/P99/min/max/throughput
-3. Percentile tự tính được kiểm chứng chéo với p50/p95 do perf_analyzer tự in — lệch quá 5% thì cảnh báo
+3. Percentile tự tính từ profile export khớp trong 5% với cả bốn percentile perf_analyzer tự in — lệch thì cảnh báo
 4. Test đơn vị của `bench/stats.py` xanh, chạy được không cần server
 5. E1–E3 và `results.csv` cũ không bị ảnh hưởng
 
@@ -56,9 +56,29 @@ Hai phương án bị loại:
 - **Mở rộng `COLUMNS` toàn cục:** thêm 4 cột percentile vào bộ cột dùng chung sẽ làm header lệch khi E1–E3 append vào `results.csv` đang tồn tại, và để lại 4 cột rỗng cho mọi dòng cũ.
 - **Viết `bench/matrix.py` độc lập:** ranh giới sạch hơn nhưng phải lặp lại `restart_server`, `vram_mb`, `run_perf` — ba hàm đã kiểm chứng qua E1–E3.
 
-### 3.2 Lấy latency đầy đủ qua profile export
+### 3.2 Hai nguồn số liệu, mỗi nguồn làm việc nó làm tốt nhất
 
-perf_analyzer chỉ in ra stdout một percentile do `--percentile` chọn, nên regex stdout không thể lấy đủ 6 thống kê. Bản 2.60.0 trong `.venv` có `--profile-export-file`, xuất JSON chứa timestamp **từng request**:
+Kiểm tra output thô của E3 (`bench/results/e3_perf_analyzer.txt`) cho thấy perf_analyzer **đã in sẵn cả bốn percentile** cùng số request:
+
+```
+Request count: 1726
+Throughput: 23.829 infer/sec
+p50 latency: 327724 usec
+p90 latency: 362057 usec
+p95 latency: 434014 usec
+p99 latency: 584353 usec
+```
+
+Thiếu đúng `min` và `max`. Nên phân vai:
+
+| Metric | Nguồn |
+|---|---|
+| throughput, P50, P90, P95, P99 | stdout của perf_analyzer — số có thẩm quyền, không phải suy diễn gì |
+| min, max, số mẫu | profile export, tự tính từ timestamp từng request |
+
+Đây là lý do quan trọng: cắt cửa sổ ổn định (mục 3.3) là bước phải phỏng đoán ngữ nghĩa của `window_boundaries`. Nếu bốn percentile chính cũng phụ thuộc bước đó thì một phỏng đoán sai sẽ âm thầm làm sai toàn bộ ma trận. Tách vai như trên thì phỏng đoán sai chỉ ảnh hưởng `min`/`max`, còn phép so chéo ở 3.6 biến nó thành lỗi nhìn thấy được.
+
+Bản perf_analyzer 2.60.0 trong `.venv` có `--profile-export-file`, xuất JSON chứa timestamp **từng request**:
 
 ```
 experiments[].experiment.{mode, value}
@@ -96,11 +116,11 @@ Lần suy luận đầu của mỗi model gánh chi phí một lần: ONNX Runti
 
 Mỗi component chạy một lượt perf_analyzer ngắn ở CCU 1 và **bỏ kết quả** trước khi vào vòng đo thật.
 
-### 3.6 Tự kiểm chứng phép tính percentile
+### 3.6 Tự kiểm chứng cách cắt cửa sổ
 
-perf_analyzer vẫn in p50 và p95 của nó ra stdout. Sau khi tự tính từ profile export, so hai cặp số này; lệch quá 5% thì in cảnh báo kèm cả hai giá trị.
+Từ profile export, tính lại cả bốn percentile P50/P90/P95/P99 rồi so với số perf_analyzer in ra. Lệch quá 5% ở bất kỳ percentile nào thì in cảnh báo kèm cả hai giá trị.
 
-Nghĩa là toán percentile được kiểm tra bởi chính công cụ đo, không phải tin suông. Nếu bộ lọc cửa sổ ổn định sai, cảnh báo này sẽ nổ.
+Bốn điểm so trên cùng một phân bố là phép kiểm chặt: nếu `min`/`max` đáng tin thì bốn percentile tự tính phải khớp, vì chúng đến từ đúng tập mẫu đó. Cảnh báo nổ nghĩa là tập mẫu dùng cho `min`/`max` không phải tập perf_analyzer đã báo cáo — lúc đó `min`/`max` mới là số cần xem lại, còn ma trận vẫn dùng được nhờ 3.2.
 
 ## 4. Ma trận đo
 
@@ -144,14 +164,17 @@ parse_profile_export(path) -> list[float]
     Đọc JSON export, trả về latency (ms) của các request trong cửa sổ ổn định.
 
 latency_stats(latencies) -> dict
-    {p50_ms, p90_ms, p95_ms, p99_ms, min_ms, max_ms}
+    {p50_ms, p90_ms, p95_ms, p99_ms, min_ms, max_ms, samples}
 ```
 
-Quy ước percentile: dùng `numpy.percentile` với nội suy tuyến tính (mặc định). Chọn numpy vì đã là dependency của project, và vì perf_analyzer cũng nội suy — giúp phép kiểm chứng chéo ở 3.6 khớp.
+`samples` là số mẫu dùng để tính — cần để đọc `p99` một cách trung thực: dưới ~100 mẫu thì p99 chỉ là một hai request cuối, không phải phân vị thật. TTS ở `request_count=16` chắc chắn rơi vào trường hợp này, và đó là thông tin phải nói với mentor chứ không phải che đi.
+
+Quy ước percentile: dùng `numpy.percentile` với nội suy tuyến tính (mặc định). Chọn numpy vì đã là dependency của project (`numpy==1.26.4`).
 
 ### 5.2 `bench/bench.py` (sửa)
 
-- `run_perf()` thêm tham số `export_path`; khi có thì bổ sung `--profile-export-file`, gọi `stats.py`, trả thêm 6 khoá latency và chạy kiểm chứng chéo 3.6.
+- `parse_summary()` regex stdout lấy throughput + P50/P90/P95/P99 + request count.
+- `run_perf()` thêm tham số `export_path`; khi có thì bổ sung `--profile-export-file`, gọi `stats.py` lấy `min`/`max`/`samples`, và chạy kiểm chứng chéo 3.6.
 - `MATRIX_COLUMNS` và `write_matrix_csv()` riêng cho `matrix.csv`.
 - `write_matrix_md()` sinh bảng markdown nhóm theo component.
 - `e4()`: khởi động server một lần, lặp 5 component × CCU 1–4, warmup rồi đo.
@@ -200,6 +223,7 @@ Theo TDD: viết test trước, xác nhận fail, rồi mới viết `stats.py`.
 | `test_multiple_response_timestamps_uses_last` | request nhiều response (streaming) lấy mốc cuối |
 | `test_requests_outside_stable_windows_excluded` | request trước `window_boundaries` ổn định bị loại |
 | `test_percentiles_on_known_array` | p50/p90/p95/p99/min/max đúng trên mảng biết trước đáp án |
+| `test_reports_sample_count` | `samples` bằng số mẫu thực dùng, để đọc p99 khỏi bị hiểu sai |
 | `test_empty_stable_window_raises` | không có mẫu nào thì báo lỗi rõ ràng, không trả 0 âm thầm |
 
 Dùng fixture JSON viết tay trong test, không phụ thuộc file export thật.

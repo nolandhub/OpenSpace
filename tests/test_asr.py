@@ -22,6 +22,12 @@ def test_recognizes_vietnamese_sentence(triton):
     wav, sample_rate = sf.read(ASSETS / "sample_vi.wav", dtype="float32")
     assert sample_rate == SAMPLE_RATE
     expected = (ASSETS / "sample_vi.txt").read_text(encoding="utf-8").strip().lower()
+    # Kiểm tra fixture trước khi gọi server - hỏng ở đây thì lỗi phải nói rõ là
+    # do dữ liệu test, đừng để nó nổ thành ZeroDivisionError ở phép chia bên dưới
+    assert expected, (
+        f"{ASSETS / 'sample_vi.txt'} rỗng — file này phải chứa đúng câu "
+        f"được nói trong sample_vi.wav"
+    )
 
     padded, real_len = pad_wav(wav)
     inputs = [

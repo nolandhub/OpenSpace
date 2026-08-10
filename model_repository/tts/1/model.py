@@ -79,6 +79,18 @@ class TritonPythonModel:
                     request, "NUM_STEPS", np.array([self.default_num_step])
                 )[0]
             )
+            # speed < 1 đọc chậm lại, > 1 đọc nhanh hơn
+            speed = float(
+                self._get_optional(request, "SPEED", np.array([1.0], dtype=np.float32))[0]
+            )
+            # guidance_scale cao thì bám ngữ điệu của giọng mẫu chặt hơn
+            guidance_scale = float(
+                self._get_optional(
+                    request,
+                    "GUIDANCE_SCALE",
+                    np.array([self.guidance_scale], dtype=np.float32),
+                )[0]
+            )
 
             prompt_wav_array = self._get_optional(request, "PROMPT_WAV")
             prompt_text_array = self._get_optional(request, "PROMPT_TEXT")
@@ -112,7 +124,8 @@ class TritonPythonModel:
                         feature_extractor=self.feature_extractor,
                         device=self.device,
                         num_step=num_step,
-                        guidance_scale=self.guidance_scale,
+                        guidance_scale=guidance_scale,
+                        speed=speed,
                         sampling_rate=SAMPLING_RATE,
                     )
                 wav, _ = sf.read(out_path, dtype="float32")

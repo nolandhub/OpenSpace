@@ -11,6 +11,9 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from bench.stats import latency_stats, parse_profile_export  # noqa: E402
+
 # Thí nghiệm chạy hàng chục phút, cần thấy tiến độ ngay cả khi ghi ra file
 sys.stdout.reconfigure(line_buffering=True)
 
@@ -107,6 +110,45 @@ def restart_server() -> None:
     raise SystemExit("Server không lên sau 4 phút, xem bench/results/server.log")
 
 
+def parse_summary(output: str) -> dict:
+    """Bóc throughput và bốn percentile từ stdout của perf_analyzer.
+
+    Đây là nguồn có thẩm quyền cho percentile - không phải suy diễn từ timestamp
+    nên không phụ thuộc cách cắt cửa sổ ổn định.
+    """
+    throughput = re.search(r"throughput:\s+([\d.]+)\s+infer/sec", output)
+    if not throughput:
+        return {}
+    result = {"throughput_rps": float(throughput.group(1))}
+    for q in (50, 90, 95, 99):
+        m = re.search(rf"p{q} latency:\s+(\d+)\s+usec", output)
+        result[f"p{q}_ms"] = round(int(m.group(1)) / 1000, 2) if m else 0
+    count = re.search(r"Request count:\s+(\d+)", output)
+    result["request_count"] = int(count.group(1)) if count else 0
+    return result
+
+
+def cross_check(computed: dict, reported: dict, label: str) -> None:
+    """So percentile tự tính với số perf_analyzer in ra.
+
+    Bốn điểm so trên cùng một phân bố: nếu khớp thì tập mẫu dùng cho min/max
+    đúng là tập perf_analyzer đã báo cáo. Lệch nghĩa là cắt cửa sổ ổn định sai,
+    lúc đó min/max mới là số cần xem lại - percentile trong ma trận vẫn đúng vì
+    lấy từ stdout.
+    """
+    for q in (50, 90, 95, 99):
+        key = f"p{q}_ms"
+        mine, theirs = computed.get(key, 0), reported.get(key, 0)
+        if not mine or not theirs:
+            continue
+        drift = abs(mine - theirs) / theirs
+        if drift > 0.05:
+            print(
+                f"  ! {label} {key}: export {mine:.1f} ms vs perf_analyzer "
+                f"{theirs:.1f} ms (lệch {drift:.0%}) - min/max có thể không đáng tin"
+            )
+
+
 def run_perf(
     model: str,
     concurrency: int,
@@ -114,11 +156,16 @@ def run_perf(
     shape: str | None,
     interval_ms: int = 20000,
     request_count: int = 0,
+    export_path: Path | None = None,
+    warmup: int = 0,
 ) -> dict:
     """Chạy perf_analyzer, trả về throughput và latency. Kèm cả output thô.
 
     stability-percentage nới lên 25%: máy này chỉ có một GPU dùng chung với
     desktop nên nhiễu tự nhiên cao, để mặc định 10% thì không bao giờ hội tụ.
+
+    Bốn percentile lấy từ stdout. min/max phải tự tính từ profile export vì
+    perf_analyzer không in hai số đó - truyền export_path để bật.
     """
     cmd = [
         PERF_ANALYZER, "-m", model, "-u", "localhost:8001", "-i", "grpc",
@@ -137,24 +184,33 @@ def run_perf(
             "--measurement-mode", "count_windows",
             "--measurement-request-count", str(request_count),
         ]
+    if warmup:
+        # Lượt suy luận đầu gánh chi phí một lần (ONNX dựng plan, CUDA nạp
+        # kernel) và rơi trọn vào max. perf_analyzer tự loại request warmup
+        # khỏi cả thống kê lẫn profile export.
+        cmd += ["--warmup-request-count", str(warmup)]
+    if export_path:
+        cmd += ["--profile-export-file", str(export_path)]
 
     proc = subprocess.run(cmd, capture_output=True, text=True, cwd=ROOT)
     output = proc.stdout
 
-    throughput = re.search(r"throughput:\s+([\d.]+)\s+infer/sec", output)
-    p50 = re.search(r"p50 latency:\s+(\d+)\s+usec", output)
-    p95 = re.search(r"p95 latency:\s+(\d+)\s+usec", output)
-    if not throughput:
+    summary = parse_summary(output)
+    if not summary:
         print(output, proc.stderr, file=sys.stderr)
         raise SystemExit(f"perf_analyzer hỏng cho {model} @ concurrency {concurrency}")
 
-    return {
-        "throughput_rps": float(throughput.group(1)),
-        "p50_ms": round(int(p50.group(1)) / 1000, 2) if p50 else 0,
-        "p95_ms": round(int(p95.group(1)) / 1000, 2) if p95 else 0,
-        "vram_mb": vram_mb(),
-        "_raw": output,
-    }
+    result = {**summary, "vram_mb": vram_mb(), "_raw": output}
+
+    if export_path:
+        computed = latency_stats(parse_profile_export(export_path))
+        cross_check(computed, summary, f"{model}@{concurrency}")
+        result |= {
+            "min_ms": computed["min_ms"],
+            "max_ms": computed["max_ms"],
+            "samples": computed["samples"],
+        }
+    return result
 
 
 def parse_model_stats(raw: str) -> dict:

@@ -342,18 +342,12 @@ Expected: có dòng `Throughput: ... infer/sec` và `p50 latency: ... usec`, kh�
 
 - [ ] **Step 5: Commit**
 
+Commit **cả** file input: `bench/input_asr.json` (1.9M) và `bench/input_encoder.json` (2.6M) đã được commit sẵn, nên `input_scorer.json` theo đúng convention đó. Lợi ích thật: chạy lại E4 không cần dựng server để sinh input.
+
 ```bash
-git add bench/gen_input.py
+git add bench/gen_input.py bench/input_scorer.json
 git commit -m "Capture real ENCODER_OUT for asr_scorer benchmark input"
 ```
-
-Không commit `bench/input_scorer.json` (file dữ liệu sinh ra, ~800KB). Kiểm tra `.gitignore`:
-
-```bash
-grep -n "input_.*json\|bench/input" .gitignore || echo "CẦN THÊM"
-```
-
-Nếu in `CẦN THÊM` thì thêm dòng `bench/input_*.json` vào `.gitignore` và commit kèm.
 
 ---
 
@@ -849,8 +843,10 @@ Nêu rõ ba hạn chế: số mẫu TTS thấp nên P99 yếu; `max` không tái
 
 - [ ] **Step 6: Commit**
 
+`bench/results/*.csv` bị `.gitignore` chặn (dòng 8) — `results.csv` của E1–E3 cũng chưa từng được commit, nên `matrix.csv` giữ nguyên quy ước đó, số liệu đi vào repo qua `README.md` và `matrix.md`.
+
 ```bash
-git add bench/README.md bench/results/matrix.csv bench/results/matrix.md
+git add bench/README.md bench/results/matrix.md
 git commit -m "Add E4 benchmark matrix results for all components at CCU 1-4"
 ```
 

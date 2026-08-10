@@ -23,6 +23,34 @@
 - `STABLE_WINDOWS = 3`.
 - Mức CCU đo: **1, 2, 3, 4**.
 
+### Trần RAM — vì sao E4 chặn cứng số request
+
+`--profile-export-file` nhúng nguyên `request_inputs` (cả tensor) vào **mỗi** bản ghi và giữ toàn bộ trong RAM của tiến trình client tới cuối run. Số đo thật trên máy này (`asr_encoder`, `/usr/bin/time -v`):
+
+| | giá trị |
+|---|---|
+| 100 request | export 636 MB, **RSS đỉnh 2,1 GB** |
+| suy ra | ~6,4 MB dữ liệu/request, ~21 MB RAM/request |
+
+Cửa sổ 20 giây ở 25 rps = 500 request ≈ 10,5 GB cho **một** cửa sổ, mà vòng ổn định cần ≥ 3 cửa sổ và perf_analyzer không giải phóng request cũ → ≈ 31 GB. Máy có 15 GB. Một lần chạy theo cấu hình cũ đã bị kernel oom-kill ở 6,6 GB RSS.
+
+Đây là **RAM hệ thống, không phải VRAM** — VRAM lúc load cả 6 model chỉ dùng 2,3/4,1 GB.
+
+Vì vậy E4 dùng `--request-count N` (chặn cứng tổng số request) thay cho cửa sổ thời gian, N đặt theo cỡ tensor từng component để RSS đỉnh ~2 GB:
+
+| component | tensor/request | `total_requests` |
+|---|---|---|
+| `asr` (ensemble) | 1,9 MB | 150 |
+| `asr_feature` | 1,9 MB in + 1,5 MB out | 120 |
+| `asr_encoder` | 6,4 MB (đo thật) | 100 |
+| `asr_scorer` | ~4,3 MB | 120 |
+| `tts` | 83 byte | dùng `request_count=16` như cũ, không cần chặn |
+
+**Hai hệ quả phải ghi vào README ở Task 5, không được im lặng:**
+
+1. P99 tính trên 100–150 mẫu chỉ là một hai request chậm nhất, không phải phân vị thật. Cột `samples` tồn tại để người đọc thấy điều đó.
+2. `--request-count` tắt vòng lặp ổn định, nên `--stability-percentage 25` không còn tác dụng với E4. Số đo là một lát cắt cố định, không phải giá trị đã hội tụ.
+
 ---
 
 ### Task 1: `bench/stats.py` — tính min/max/percentile từ profile export
@@ -441,6 +469,7 @@ def run_perf(
     request_count: int = 0,
     export_path: Path | None = None,
     warmup: int = 0,
+    total_requests: int = 0,
 ) -> dict:
     """Chạy perf_analyzer, trả về throughput và latency. Kèm cả output thô.
 
@@ -449,6 +478,10 @@ def run_perf(
 
     Bốn percentile lấy từ stdout. min/max phải tự tính từ profile export vì
     perf_analyzer không in hai số đó - truyền export_path để bật.
+
+    total_requests chặn cứng tổng số request. Bắt buộc khi bật export: mỗi bản
+    ghi export ôm nguyên tensor input nên RAM phình theo số request, cửa sổ thời
+    gian không có trần và đã từng làm kernel oom-kill. Xem mục trần RAM ở plan.
     """
     cmd = [
         PERF_ANALYZER, "-m", model, "-u", "localhost:8001", "-i", "grpc",
@@ -472,6 +505,10 @@ def run_perf(
         # kernel) và rơi trọn vào max. perf_analyzer tự loại request warmup
         # khỏi cả thống kê lẫn profile export.
         cmd += ["--warmup-request-count", str(warmup)]
+    if total_requests:
+        # Trần RAM, không phải tuỳ chọn: xem mục trần RAM ở đầu plan.
+        # Cờ này tắt vòng lặp ổn định nên stability-percentage hết tác dụng.
+        cmd += ["--request-count", str(total_requests)]
     if export_path:
         cmd += ["--profile-export-file", str(export_path)]
 
@@ -512,8 +549,11 @@ Expected: header vẫn là `experiment,variant,concurrency,throughput_rps,p50_ms
 
 Đây là bước then chốt: xác nhận ngữ nghĩa `window_boundaries` mình đoán là đúng.
 
+Chạy có chặn RAM (`ulimit`) để nếu ước lượng sai thì tiến trình tự chết chứ không kéo sập máy:
+
 ```bash
 mkdir -p bench/results/export
+( ulimit -v 8388608
 .venv/bin/python - <<'PY'
 import sys
 from pathlib import Path
@@ -522,18 +562,31 @@ from bench.bench import ENCODER_ARGS, run_perf
 from bench.stats import latency_stats, parse_profile_export
 
 export = Path("bench/results/export/probe.json")
-r = run_perf("asr_encoder", 2, *ENCODER_ARGS, export_path=export, warmup=10)
+r = run_perf("asr_encoder", 2, *ENCODER_ARGS, export_path=export, warmup=10,
+             total_requests=100)
 c = latency_stats(parse_profile_export(export))
 print("perf_analyzer:", {k: r[k] for k in ("p50_ms", "p90_ms", "p95_ms", "p99_ms")})
 print("tự tính      :", {k: c[k] for k in ("p50_ms", "p90_ms", "p95_ms", "p99_ms")})
 print("min/max/samples:", c["min_ms"], c["max_ms"], c["samples"])
 print("request_count báo cáo:", r["request_count"])
 PY
+)
 ```
 
-Expected: hai dòng percentile khớp nhau trong 5% và **không** có dòng cảnh báo `!`. `samples` nên xấp xỉ `request_count`.
+Expected: hai dòng percentile khớp nhau trong 5% và **không** có dòng cảnh báo `!`. `samples` phải đúng bằng `request_count`.
 
-**Nếu cảnh báo nổ:** ngữ nghĩa `window_boundaries` khác dự đoán. Chẩn đoán bằng cách in cấu trúc thật:
+**Kết quả đã đo (2026-08-10, `asr_encoder` @ CCU 2, `--request-count 100`):**
+
+| nguồn | p50 | p90 | p95 | p99 |
+|---|---|---|---|---|
+| perf_analyzer stdout | 59.22 | 59.61 | 60.01 | 61.20 |
+| tự tính từ export | 59.22 | 59.62 | 60.02 | 61.21 |
+
+Lệch < 0,02%. `samples` = 100 = `request_count`. `min/max` = 57.84 / 62.53 ms. RSS đỉnh 2,1 GB, export 636 MB.
+
+Ngữ nghĩa hoá ra đơn giản hơn dự đoán: với `--request-count`, `window_boundaries` chỉ có **2 mốc** nên nhánh `len(boundaries) > STABLE_WINDOWS` là False và `parse_profile_export` lấy toàn bộ request — đúng bằng tập perf_analyzer báo cáo. Phép cắt 3 cửa sổ cuối vì thế **không chạy trong đường đi thật của E4**; nó vẫn được giữ (và vẫn có test đơn vị) cho trường hợp đo bằng cửa sổ thời gian.
+
+**Nếu cảnh báo nổ trên máy khác:** in cấu trúc thật để chẩn đoán:
 
 ```bash
 .venv/bin/python -c "
@@ -592,6 +645,8 @@ MATRIX_COLUMNS = [
 ]
 CCU_LEVELS = (1, 2, 3, 4)
 ```
+
+`samples` trong ma trận sẽ bằng đúng `total_requests` của component, không phải hàng nghìn như E1–E3 — đây là hệ quả của trần RAM, xem mục đầu plan.
 
 - [ ] **Step 2: Thêm `scorer_args()`**
 
@@ -689,18 +744,20 @@ def e4():
     export_dir.mkdir(parents=True, exist_ok=True)
     restart_server()
 
-    # (nhãn, model, file input, shape, request_count, warmup)
+    # (nhãn, model, file input, shape, request_count, warmup, total_requests)
     # TTS ~2.4s/câu nên phải đo theo số request; warmup 2 thay vì 10 cho đỡ tốn.
+    # total_requests là trần RAM cho profile export - xem mục trần RAM ở đầu plan.
+    # Đặt theo cỡ tensor: encoder 6.4 MB/req nặng nhất nên số nhỏ nhất.
     components = [
-        ("asr (ensemble)", "asr", *ASR_ARGS, 0, 10),
-        ("asr_feature", "asr_feature", *ASR_ARGS, 0, 10),
-        ("asr_encoder", "asr_encoder", *ENCODER_ARGS, 0, 10),
-        ("asr_scorer", "asr_scorer", *scorer_args(), 0, 10),
-        ("tts", "tts", *TTS_ARGS, 16, 2),
+        ("asr (ensemble)", "asr", *ASR_ARGS, 0, 10, 150),
+        ("asr_feature", "asr_feature", *ASR_ARGS, 0, 10, 120),
+        ("asr_encoder", "asr_encoder", *ENCODER_ARGS, 0, 10, 100),
+        ("asr_scorer", "asr_scorer", *scorer_args(), 0, 10, 120),
+        ("tts", "tts", *TTS_ARGS, 16, 2, 0),
     ]
 
     rows = []
-    for label, model, input_file, shape, request_count, warmup in components:
+    for label, model, input_file, shape, request_count, warmup, total in components:
         print(f"\n=== E4 {label} ===")
         for concurrency in CCU_LEVELS:
             export_path = export_dir / f"{model}_ccu{concurrency}.json"
@@ -712,9 +769,13 @@ def e4():
                 request_count=request_count,
                 export_path=export_path,
                 warmup=warmup,
+                total_requests=total,
             )
             rows.append({"component": label, "concurrency": concurrency, **result})
             print_matrix(rows[-1:])
+            # File export vài trăm MB mỗi ô, 20 ô là chục GB - xoá ngay sau khi
+            # đã bóc min/max ra khỏi nó.
+            export_path.unlink(missing_ok=True)
 
     write_matrix_csv(rows)
     write_matrix_md(rows)
@@ -839,7 +900,13 @@ Rồi thêm mục E4 gồm: bảng dán từ `matrix.md`, và phần đọc số
 2. `asr_feature` (CPU, count=4) so với `asr_scorer` (GPU, count=2) hành xử khác nhau thế nào khi CCU tăng
 3. Khoảng cách giữa P99 và max nói gì về độ ổn định
 
-Nêu rõ ba hạn chế: số mẫu TTS thấp nên P99 yếu; `max` không tái lập được; toàn bộ là số phía server, chưa tính overhead client.
+Nêu rõ **năm** hạn chế:
+
+1. Số mẫu mọi component đều thấp (100–150, TTS còn thấp hơn) vì trần RAM của profile export — P99 chỉ là một hai request chậm nhất, không phải phân vị thật.
+2. `--request-count` tắt vòng lặp ổn định, nên số đo là một lát cắt cố định chứ không phải giá trị đã hội tụ; `--stability-percentage 25` không còn tác dụng ở E4. Đây là khác biệt đáng kể so với E1–E3 và phải nói rõ khi đặt hai bảng cạnh nhau.
+3. `max` không tái lập được.
+4. Toàn bộ là số phía server, chưa tính overhead client.
+5. Nghẽn là RAM máy chủ chạy client (15 GB), không phải VRAM (2,3/4,1 GB lúc load cả 6 model) — ai chạy lại trên máy nhiều RAM hơn thì nâng `total_requests` lên để P99 có nghĩa hơn.
 
 - [ ] **Step 6: Commit**
 

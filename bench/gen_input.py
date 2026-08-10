@@ -36,3 +36,56 @@ x = rng.standard_normal((MAX_FRAMES, NUM_MEL_BINS)).astype(np.float32)
     json.dumps({"data": [{"x": x.reshape(-1).tolist(), "x_lens": [MAX_FRAMES]}]})
 )
 print("đã ghi bench/input_encoder.json")
+
+# Scorer nhận ENCODER_OUT - tensor trung gian, không tồn tại dưới dạng file.
+# RNN-T greedy search chạy số bước phụ thuộc nội dung tensor (mỗi bước phát một
+# token hoặc blank) nên tensor ngẫu nhiên cho thời gian giải mã không đại diện.
+# Phải bắt tensor thật từ server, dùng đúng file wav mà các thí nghiệm khác dùng.
+# Bước này để cuối cùng: ba file trên không cần server, hỏng ở đây vẫn còn dùng được.
+import tritonclient.grpc as grpcclient  # noqa: E402
+
+client = grpcclient.InferenceServerClient("localhost:8001")
+try:
+    ready = client.is_server_ready()
+except Exception as e:
+    raise SystemExit(
+        f"Không kết nối được Triton tại localhost:8001 ({e}).\n"
+        "Chạy scripts/serve.sh rồi gọi lại lệnh này để sinh input_scorer.json."
+    )
+if not ready:
+    raise SystemExit(
+        "Triton chưa sẵn sàng. Chạy scripts/serve.sh rồi gọi lại lệnh này."
+    )
+
+feature_inputs = [
+    grpcclient.InferInput("WAV", [1, len(padded)], "FP32"),
+    grpcclient.InferInput("WAV_LEN", [1, 1], "INT32"),
+]
+feature_inputs[0].set_data_from_numpy(padded.reshape(1, -1))
+feature_inputs[1].set_data_from_numpy(np.array([[real_len]], dtype=np.int32))
+feature_out = client.infer("asr_feature", feature_inputs)
+speech = feature_out.as_numpy("SPEECH")
+speech_len = feature_out.as_numpy("SPEECH_LEN").reshape(1, 1).astype(np.int64)
+
+encoder_inputs = [
+    grpcclient.InferInput("x", list(speech.shape), "FP32"),
+    grpcclient.InferInput("x_lens", [1, 1], "INT64"),
+]
+encoder_inputs[0].set_data_from_numpy(speech)
+encoder_inputs[1].set_data_from_numpy(speech_len)
+encoder_out = client.infer("asr_encoder", encoder_inputs).as_numpy("encoder_out")
+
+frames = encoder_out.shape[1]
+(ROOT / "bench/input_scorer.json").write_text(
+    json.dumps(
+        {
+            "data": [
+                {
+                    "ENCODER_OUT": encoder_out.reshape(-1).tolist(),
+                    "ENCODER_OUT_LEN": [frames],
+                }
+            ]
+        }
+    )
+)
+print(f"đã ghi bench/input_scorer.json (ENCODER_OUT shape {frames}x512)")

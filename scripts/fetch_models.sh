@@ -19,6 +19,16 @@ dl "$ASR/decoder-epoch-20-avg-10.onnx" "$REPO/asr_scorer/1/decoder.onnx"
 dl "$ASR/joiner-epoch-20-avg-10.onnx"  "$REPO/asr_scorer/1/joiner.onnx"
 dl "$ASR/bpe.model"                     "$REPO/asr_scorer/1/bpe.model"
 
+# ASR streaming - repo đã export sẵn ONNX fp16 theo từng biến thể chunk.
+# CHUNK_VARIANT đổi được: 16 (latency thấp nhất), 32, 64. Xem spec 2026-08-10 mục 4.
+CHUNK_VARIANT="${CHUNK_VARIANT:-16}"
+STREAM=https://huggingface.co/hynt/Zipformer-30M-RNNT-Streaming-6000h/resolve/main
+SFX="epoch-31-avg-11-chunk-${CHUNK_VARIANT}-left-128.fp16.onnx"
+dl "$STREAM/encoder-$SFX" "$REPO/asr_streaming/1/encoder.onnx"
+dl "$STREAM/decoder-$SFX" "$REPO/asr_streaming/1/decoder.onnx"
+dl "$STREAM/joiner-$SFX"  "$REPO/asr_streaming/1/joiner.onnx"
+dl "$STREAM/bpe.model"    "$REPO/asr_streaming/1/bpe.model"
+
 TTS=https://huggingface.co/hynt/ZipVoice-Vietnamese-2500h/resolve/main
 dl "$TTS/iter-525000-avg-2.pt" "$REPO/tts/1/model.pt"
 dl "$TTS/tokens.txt"           "$REPO/tts/1/tokens.txt"

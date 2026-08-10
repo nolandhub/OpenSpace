@@ -17,3 +17,7 @@ for path in sys.argv[1:]:
         print(f"  IN   {i.name:20s} {dims(i)}")
     for o in m.graph.output:
         print(f"  OUT  {o.name:20s} {dims(o)}")
+    if m.metadata_props:
+        print("  META")
+        for p in m.metadata_props:
+            print(f"       {p.key} = {p.value}")

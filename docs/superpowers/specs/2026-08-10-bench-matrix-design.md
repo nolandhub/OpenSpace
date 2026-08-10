@@ -114,7 +114,9 @@ Shape `[T, 512]` không hardcode ở hai nơi. `bench.py` đọc `input_scorer.j
 
 Lần suy luận đầu của mỗi model gánh chi phí một lần: ONNX Runtime dựng execution plan, CUDA nạp kernel, Python backend nạp checkpoint lười. Chi phí này rơi trọn vào `max` — đúng metric mentor yêu cầu.
 
-Mỗi component chạy một lượt perf_analyzer ngắn ở CCU 1 và **bỏ kết quả** trước khi vào vòng đo thật.
+perf_analyzer có sẵn `--warmup-request-count`, và request warmup được chính nó loại khỏi thống kê lẫn khỏi profile export. Dùng cờ này thay vì tự chạy một lượt đo rồi bỏ kết quả: ít code hơn và không có nguy cơ lượt bỏ đi lọt vào file export.
+
+Số request warmup: 10 cho bốn component ASR, 2 cho TTS (2.4 giây một câu nên 10 lượt là quá tốn).
 
 ### 3.6 Tự kiểm chứng cách cắt cửa sổ
 

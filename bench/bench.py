@@ -35,6 +35,25 @@ ASR_ARGS = ("bench/input_asr.json", "WAV:256000")
 TTS_ARGS = ("bench/input_tts.json", None)
 ENCODER_ARGS = ("bench/input_encoder.json", "x:1600,80")
 
+SCORER_INPUT = "bench/input_scorer.json"
+
+MATRIX_PATH = RESULTS / "matrix.csv"
+MATRIX_MD_PATH = RESULTS / "matrix.md"
+MATRIX_COLUMNS = [
+    "component",
+    "concurrency",
+    "throughput_rps",
+    "p50_ms",
+    "p90_ms",
+    "p95_ms",
+    "p99_ms",
+    "min_ms",
+    "max_ms",
+    "samples",
+    "vram_mb",
+]
+CCU_LEVELS = (1, 2, 3, 4)
+
 
 # ---------------------------------------------------------------- hạ tầng đo
 
@@ -72,6 +91,22 @@ def avg_batch_size(model: str, before: tuple[int, int]) -> float:
     after = read_stats(model)
     d_inference, d_execution = after[0] - before[0], after[1] - before[1]
     return d_inference / d_execution if d_execution else 0.0
+
+
+def scorer_args() -> tuple[str, str]:
+    """Input và --shape cho asr_scorer.
+
+    Shape suy từ chính file input nên hai chỗ không thể lệch nhau: T do encoder
+    quyết định (Zipformer subsample ~4 lần), hardcode là sẽ sai khi đổi audio mẫu.
+    """
+    path = ROOT / SCORER_INPUT
+    if not path.exists():
+        raise SystemExit(
+            f"Thiếu {SCORER_INPUT}. Chạy .venv/bin/python bench/gen_input.py "
+            "khi Triton đang chạy để sinh file này."
+        )
+    frames = json.loads(path.read_text())["data"][0]["ENCODER_OUT_LEN"][0]
+    return SCORER_INPUT, f"ENCODER_OUT:{frames},512"
 
 
 def set_config(path: Path, key: str, value) -> None:
@@ -158,6 +193,7 @@ def run_perf(
     request_count: int = 0,
     export_path: Path | None = None,
     warmup: int = 0,
+    total_requests: int = 0,
 ) -> dict:
     """Chạy perf_analyzer, trả về throughput và latency. Kèm cả output thô.
 
@@ -166,6 +202,10 @@ def run_perf(
 
     Bốn percentile lấy từ stdout. min/max phải tự tính từ profile export vì
     perf_analyzer không in hai số đó - truyền export_path để bật.
+
+    total_requests chặn cứng tổng số request. Bắt buộc khi bật export: mỗi bản
+    ghi export ôm nguyên tensor input nên RAM phình theo số request, cửa sổ thời
+    gian không có trần và đã từng làm kernel oom-kill. Xem mục trần RAM ở plan.
     """
     cmd = [
         PERF_ANALYZER, "-m", model, "-u", "localhost:8001", "-i", "grpc",
@@ -189,6 +229,10 @@ def run_perf(
         # kernel) và rơi trọn vào max. perf_analyzer tự loại request warmup
         # khỏi cả thống kê lẫn profile export.
         cmd += ["--warmup-request-count", str(warmup)]
+    if total_requests:
+        # Trần RAM, không phải tuỳ chọn: xem mục trần RAM ở đầu plan.
+        # Cờ này tắt vòng lặp ổn định nên stability-percentage hết tác dụng.
+        cmd += ["--request-count", str(total_requests)]
     if export_path:
         cmd += ["--profile-export-file", str(export_path)]
 
@@ -257,6 +301,61 @@ def print_table(rows) -> None:
         print(
             f"{r['variant']:22s} {r['concurrency']:5d} {r['throughput_rps']:8.2f} "
             f"{r['p50_ms']:9.1f} {r['p95_ms']:9.1f} {r['vram_mb']:7d}"
+        )
+
+
+def write_matrix_csv(rows) -> None:
+    """Ghi đè, không append: E4 là một ma trận trọn vẹn chứ không phải log."""
+    RESULTS.mkdir(parents=True, exist_ok=True)
+    with MATRIX_PATH.open("w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=MATRIX_COLUMNS)
+        writer.writeheader()
+        writer.writerows([{k: r.get(k, 0) for k in MATRIX_COLUMNS} for r in rows])
+    print(f"đã ghi {MATRIX_PATH}")
+
+
+def write_matrix_md(rows) -> None:
+    """Bảng markdown nhóm theo component, dán trực tiếp vào chat được."""
+    lines = [
+        "# Ma trận latency và throughput",
+        "",
+        f"Đo ngày {time.strftime('%Y-%m-%d')}. Số liệu thô: `matrix.csv`.",
+        "",
+        "P50/P90/P95/P99 và throughput lấy từ perf_analyzer; min/max tính từ "
+        "profile export. Cột `mẫu` là số request dùng để tính - dưới ~100 thì "
+        "P99 chỉ là một hai request cuối, đọc kèm cảnh giác.",
+        "",
+    ]
+    for component in dict.fromkeys(r["component"] for r in rows):
+        lines += [
+            f"## {component}",
+            "",
+            "| CCU | throughput (rps) | P50 | P90 | P95 | P99 | min | max | mẫu |",
+            "|---|---|---|---|---|---|---|---|---|",
+        ]
+        for r in (x for x in rows if x["component"] == component):
+            lines.append(
+                f"| {r['concurrency']} | {r['throughput_rps']:.2f} | "
+                f"{r['p50_ms']:.1f} | {r['p90_ms']:.1f} | {r['p95_ms']:.1f} | "
+                f"{r['p99_ms']:.1f} | {r.get('min_ms', 0):.1f} | "
+                f"{r.get('max_ms', 0):.1f} | {r.get('samples', 0)} |"
+            )
+        lines.append("")
+    MATRIX_MD_PATH.write_text("\n".join(lines))
+    print(f"đã ghi {MATRIX_MD_PATH}")
+
+
+def print_matrix(rows) -> None:
+    print(
+        f"\n{'component':16s} {'ccu':>4s} {'rps':>8s} {'p50':>8s} {'p90':>8s} "
+        f"{'p95':>8s} {'p99':>8s} {'min':>8s} {'max':>8s} {'mẫu':>6s}"
+    )
+    for r in rows:
+        print(
+            f"{r['component']:16s} {r['concurrency']:4d} {r['throughput_rps']:8.2f} "
+            f"{r['p50_ms']:8.1f} {r['p90_ms']:8.1f} {r['p95_ms']:8.1f} "
+            f"{r['p99_ms']:8.1f} {r.get('min_ms', 0):8.1f} "
+            f"{r.get('max_ms', 0):8.1f} {r.get('samples', 0):6d}"
         )
 
 
@@ -378,6 +477,54 @@ def e3():
     print("output thô: bench/results/e3_perf_analyzer.txt")
 
 
+def e4():
+    """Ma trận đầy đủ: 5 component × CCU 1-4 × 7 metric.
+
+    Không sửa config.pbtxt nào nên chỉ cần khởi động server một lần cho cả
+    thí nghiệm - khác E1/E2 phải restart giữa mỗi bước.
+    """
+    export_dir = RESULTS / "export"
+    export_dir.mkdir(parents=True, exist_ok=True)
+    restart_server()
+
+    # (nhãn, model, file input, shape, request_count, warmup, total_requests)
+    # TTS ~2.4s/câu nên phải đo theo số request; warmup 2 thay vì 10 cho đỡ tốn.
+    # total_requests là trần RAM cho profile export - xem mục trần RAM ở đầu plan.
+    # Đặt theo cỡ tensor: encoder 6.4 MB/req nặng nhất nên số nhỏ nhất.
+    components = [
+        ("asr (ensemble)", "asr", *ASR_ARGS, 0, 10, 150),
+        ("asr_feature", "asr_feature", *ASR_ARGS, 0, 10, 120),
+        ("asr_encoder", "asr_encoder", *ENCODER_ARGS, 0, 10, 100),
+        ("asr_scorer", "asr_scorer", *scorer_args(), 0, 10, 120),
+        ("tts", "tts", *TTS_ARGS, 16, 2, 0),
+    ]
+
+    rows = []
+    for label, model, input_file, shape, request_count, warmup, total in components:
+        print(f"\n=== E4 {label} ===")
+        for concurrency in CCU_LEVELS:
+            export_path = export_dir / f"{model}_ccu{concurrency}.json"
+            result = run_perf(
+                model,
+                concurrency,
+                input_file,
+                shape,
+                request_count=request_count,
+                export_path=export_path,
+                warmup=warmup,
+                total_requests=total,
+            )
+            rows.append({"component": label, "concurrency": concurrency, **result})
+            print_matrix(rows[-1:])
+            # File export vài trăm MB mỗi ô, 20 ô là chục GB - xoá ngay sau khi
+            # đã bóc min/max ra khỏi nó.
+            export_path.unlink(missing_ok=True)
+
+    write_matrix_csv(rows)
+    write_matrix_md(rows)
+    print_matrix(rows)
+
+
 if __name__ == "__main__":
     RESULTS.mkdir(parents=True, exist_ok=True)
-    {"e1": e1, "e1b": e1b, "e2": e2, "e3": e3}[sys.argv[1]]()
+    {"e1": e1, "e1b": e1b, "e2": e2, "e3": e3, "e4": e4}[sys.argv[1]]()

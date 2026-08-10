@@ -1,6 +1,9 @@
 # ABOUTME: Logic thuần cho streaming ASR - fbank tính dần và greedy search theo chunk
 # ABOUTME: Không import Triton/ONNX; decoder/joiner truyền vào dạng hàm như greedy_search.py của asr_scorer
 
+from dataclasses import dataclass
+from typing import Callable, List
+
 import numpy as np
 import torch
 import torchaudio.compliance.kaldi as kaldi
@@ -74,3 +77,48 @@ class StreamingFbank:
         abs_end = self._buf_start + len(self._buf)
         total = (abs_end + _CENTER) // FRAME_SHIFT   # công thức số khung của snip_edges=False
         return self._emit_until(total - 1)
+
+
+@dataclass
+class SearchState:
+    """Trạng thái greedy search sống qua các chunk của một stream."""
+
+    hyp: List[int]
+    decoder_out: np.ndarray
+
+
+def init_search_state(
+    run_decoder: Callable[[List[int]], np.ndarray],
+    blank_id: int = 0,
+    context_size: int = 2,
+) -> SearchState:
+    """Ngữ cảnh khởi tạo toàn blank, chạy decoder một lần - như greedy_search làm ở đầu câu."""
+    hyp = [blank_id] * context_size
+    return SearchState(hyp=hyp, decoder_out=run_decoder(hyp[-context_size:]))
+
+
+def greedy_search_step(
+    encoder_out: np.ndarray,
+    state: SearchState,
+    run_decoder: Callable[[List[int]], np.ndarray],
+    run_joiner: Callable[[np.ndarray, np.ndarray], np.ndarray],
+    blank_id: int = 0,
+    context_size: int = 2,
+) -> SearchState:
+    """Đi tiếp vòng greedy trên một đoạn encoder_out (T, C).
+
+    Cùng logic với greedy_search của asr_scorer, chỉ khác: trạng thái nhận vào
+    và trả ra thay vì khởi tạo - kết thúc trong một lần gọi.
+    """
+    for t in range(encoder_out.shape[0]):
+        logits = run_joiner(encoder_out[t : t + 1], state.decoder_out)
+        token = int(np.argmax(logits.reshape(-1)))
+        if token != blank_id:
+            state.hyp.append(token)
+            state.decoder_out = run_decoder(state.hyp[-context_size:])
+    return state
+
+
+def emitted_tokens(state: SearchState, context_size: int = 2) -> List[int]:
+    """Token đã phát, bỏ phần ngữ cảnh blank khởi tạo."""
+    return state.hyp[context_size:]

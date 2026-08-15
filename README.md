@@ -42,6 +42,7 @@ Serving ASR (Zipformer RNN-T) và TTS (ZipVoice) tiếng Việt trên Triton Inf
     .venv/bin/python bench/bench.py e1b   # quét concurrency client
     .venv/bin/python bench/bench.py e2    # quét instance_group.count của TTS
     .venv/bin/python bench/bench.py e3    # breakdown từng tầng ensemble
+    .venv/bin/python bench/bench.py e5    # công suất asr_streaming theo số stream
 
 Kết quả đã đo và phần phân tích: `bench/README.md`
 

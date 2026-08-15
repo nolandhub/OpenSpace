@@ -27,6 +27,21 @@ def load_wav_16k(path) -> np.ndarray:
     return np.asarray(wav, dtype=np.float32)
 
 
+def chunk_wav(wav: np.ndarray, chunk_ms: int = 200) -> list[np.ndarray]:
+    """Cắt waveform thành các chunk CÙNG độ dài, bỏ phần dư cuối.
+
+    Khác cách client streaming cắt: ở đó chunk cuối ngắn hơn cũng gửi được, còn
+    perf_analyzer khai `--shape` một lần cho cả sequence nên mọi request phải
+    đúng một cỡ. Thà bỏ phần dư (<chunk_ms) còn hơn đệm im lặng vào - đệm sẽ
+    thêm khung blank giả và làm lệch chính thứ đang đo là vòng greedy search.
+    """
+    chunk = SAMPLE_RATE * chunk_ms // 1000
+    if chunk <= 0:
+        raise ValueError(f"chunk_ms={chunk_ms} cho ra chunk {chunk} mẫu")
+    wav = np.asarray(wav, dtype=np.float32).reshape(-1)
+    return [wav[i : i + chunk] for i in range(0, len(wav) - chunk + 1, chunk)]
+
+
 def pad_wav(wav: np.ndarray) -> tuple[np.ndarray, int]:
     """Đệm waveform về đúng MAX_SAMPLES, trả về (mảng đã đệm, độ dài thật).
 

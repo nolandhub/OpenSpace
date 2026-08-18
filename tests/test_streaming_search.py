@@ -1,14 +1,12 @@
-# ABOUTME: Unit test cho greedy search theo chunk - đối chiếu với greedy_search cả câu của asr_scorer
-# ABOUTME: decoder/joiner giả cùng kiểu test_greedy_search.py, không cần GPU/ONNX
+# ABOUTME: Unit test cho greedy search theo chunk - cắt kiểu gì cũng phải ra một kết quả
+# ABOUTME: decoder/joiner giả, không cần GPU/ONNX/server
 
 import sys
 from pathlib import Path
 
 import numpy as np
 
-sys.path.insert(0, str(Path(__file__).parent.parent / "model_repository/asr_scorer/1"))
 sys.path.insert(0, str(Path(__file__).parent.parent / "model_repository/asr_streaming/1"))
-from greedy_search import greedy_search  # noqa: E402
 from streaming_search import emitted_tokens, greedy_search_step, init_search_state  # noqa: E402
 
 DIM = 4
@@ -34,16 +32,24 @@ def fake_joiner(emitted):
 
 
 def test_chunked_matches_full_utterance():
-    """Bất biến quan trọng nhất: cắt encoder_out kiểu gì thì kết quả cũng như chạy một lần."""
+    """Bất biến quan trọng nhất: cắt encoder_out kiểu gì thì kết quả cũng như chạy một lần.
+
+    Tham chiếu là chính nó gọi một lượt trên cả 10 khung - đó đúng là ca cả câu.
+    Trước đây tham chiếu lấy từ `greedy_search` của ensemble offline, nhưng bản
+    ensemble đã gỡ khỏi repo nên phép đối chiếu đó không còn nguồn.
+    """
     script = [0, 7, 0, 3, 0, 0, 9, 0, 2, 0]
     enc = np.zeros((10, DIM), dtype=np.float32)
-    want = greedy_search(enc, 10, fake_decoder, fake_joiner(script))
 
-    state = init_search_state(fake_decoder)
+    whole = init_search_state(fake_decoder)
+    greedy_search_step(enc, whole, fake_decoder, fake_joiner(script))
+
+    split = init_search_state(fake_decoder)
     joiner = fake_joiner(script)
     for part in np.split(enc, [3, 4, 8]):   # các chunk 3, 1, 4, 2 khung
-        greedy_search_step(part, state, fake_decoder, joiner)
-    assert emitted_tokens(state) == want
+        greedy_search_step(part, split, fake_decoder, joiner)
+
+    assert emitted_tokens(split) == emitted_tokens(whole) == [7, 3, 9, 2]
 
 
 def test_empty_chunk_changes_nothing():

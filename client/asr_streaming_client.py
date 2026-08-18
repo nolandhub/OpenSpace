@@ -3,6 +3,7 @@
 
 import argparse
 import queue
+import shutil
 import sys
 import time
 from pathlib import Path
@@ -13,9 +14,27 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from client.common import SAMPLE_RATE, load_wav_16k  # noqa: E402
 
 
+def format_partial(text: str, width: int) -> str:
+    """Gò partial còn đúng một dòng terminal, giữ phần đuôi.
+
+    \\r chỉ lùi được về đầu dòng vật lý hiện tại. Partial dài hơn width thì
+    terminal tự wrap, những dòng wrap phía trên nằm lại vĩnh viễn và output
+    thành một bức tường chữ lặp. Cắt sẵn ở đây thì không bao giờ wrap.
+    """
+    if width <= 0:
+        return ""
+    return text[-width:]
+
+
+def _transcript(result) -> str:
+    return result.as_numpy("TRANSCRIPT")[0, 0].decode("utf-8")
+
+
 def _print_partial(result):
     # in đè dòng hiện tại để partial chạy như phụ đề trực tiếp
-    print(f"\r{result.as_numpy('TRANSCRIPT')[0, 0].decode('utf-8')}", end="", flush=True)
+    # \x1b[K xoá phần đuôi cũ còn sót khi partial mới ngắn hơn partial trước
+    line = format_partial(_transcript(result), shutil.get_terminal_size().columns - 1)
+    print(f"\r{line}\x1b[K", end="", flush=True)
 
 
 def main():
@@ -36,6 +55,7 @@ def main():
     seq_id = int(time.time()) % 2**31 + 1   # đủ khác nhau giữa các lần chạy
 
     received = 0
+    final = ""
     for i, part in enumerate(parts):
         inp = grpcclient.InferInput("AUDIO_CHUNK", [1, len(part)], "FP32")
         inp.set_data_from_numpy(part.reshape(1, -1))
@@ -57,6 +77,7 @@ def main():
             if error:
                 raise SystemExit(f"lỗi từ server: {error}")
             received += 1
+            final = _transcript(result)
             _print_partial(result)
 
     while received < len(parts):
@@ -64,8 +85,10 @@ def main():
         if error:
             raise SystemExit(f"lỗi từ server: {error}")
         received += 1
+        final = _transcript(result)
         _print_partial(result)
-    print()
+    # partial chạy trên một dòng cắt cụt, nên in lại bản đầy đủ để đọc và đối chiếu
+    print(f"\r\x1b[K{final}")
     client.stop_stream()
 
 

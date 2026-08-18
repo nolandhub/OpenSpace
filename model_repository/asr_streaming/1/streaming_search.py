@@ -1,5 +1,5 @@
 # ABOUTME: Logic thuần cho streaming ASR - fbank tính dần và greedy search theo chunk
-# ABOUTME: Không import Triton/ONNX; decoder/joiner truyền vào dạng hàm như greedy_search.py của asr_scorer
+# ABOUTME: Không import Triton/ONNX - decoder/joiner truyền vào dạng hàm, test được khi server tắt
 
 from dataclasses import dataclass
 from typing import Callable, List
@@ -12,13 +12,13 @@ SAMPLE_RATE = 16000
 NUM_MEL_BINS = 80
 FRAME_SHIFT = 160        # 10ms
 FRAME_LENGTH = 400       # 25ms
-# snip_edges=False (khớp asr_feature): khung j có tâm tại j*160+80, cửa sổ [tâm-200, tâm+200)
+# snip_edges=False: khung j có tâm tại j*160+80, cửa sổ [tâm-200, tâm+200)
 _CENTER = FRAME_SHIFT // 2        # 80
 _HALF_WINDOW = FRAME_LENGTH // 2  # 200
 
 
 def offline_fbank(samples: np.ndarray) -> np.ndarray:
-    """Fbank cả câu, đúng tham số asr_feature dùng - chuẩn đối chiếu cho bản streaming."""
+    """Fbank cả câu - chuẩn đối chiếu để kiểm bản streaming khớp từng số."""
     wav = torch.from_numpy(np.ascontiguousarray(samples)).unsqueeze(0)
     feat = kaldi.fbank(
         wav,
@@ -107,8 +107,8 @@ def greedy_search_step(
 ) -> SearchState:
     """Đi tiếp vòng greedy trên một đoạn encoder_out (T, C).
 
-    Cùng logic với greedy_search của asr_scorer, chỉ khác: trạng thái nhận vào
-    và trả ra thay vì khởi tạo - kết thúc trong một lần gọi.
+    Trạng thái nhận vào và trả ra thay vì khởi tạo mỗi lần gọi - đó là toàn bộ
+    khác biệt so với greedy search cả câu.
     """
     for t in range(encoder_out.shape[0]):
         logits = run_joiner(encoder_out[t : t + 1], state.decoder_out)

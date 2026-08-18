@@ -1,19 +1,20 @@
-# ABOUTME: Thống kê latency thuần - min/max/percentile từ một dãy số đo được
+# ABOUTME: Percentile thuần - dùng chung cho first-chunk latency (ASR) và RTF (TTS)
 # ABOUTME: Hàm thuần - không subprocess, không mạng, test được khi server tắt
 
 import numpy as np
 
 
-def latency_stats(latencies) -> dict:
-    """Sáu thống kê latency. samples để biết p99 có ý nghĩa hay không."""
-    a = np.asarray(latencies, dtype=float)
-    p50, p90, p95, p99 = np.percentile(a, [50, 90, 95, 99])
-    return {
-        "p50_ms": round(float(p50), 2),
-        "p90_ms": round(float(p90), 2),
-        "p95_ms": round(float(p95), 2),
-        "p99_ms": round(float(p99), 2),
-        "min_ms": round(float(a.min()), 2),
-        "max_ms": round(float(a.max()), 2),
-        "samples": int(a.size),
-    }
+def p50_p95(values) -> tuple[float, float]:
+    """Điển hình và tệ-trong-thực-tế. Hai mốc là đủ cho phép đo vài chục mẫu.
+
+    Không có p99 ở đây: script này chỉ đo những chỉ số perf_analyzer không thấy
+    được, mà mấy chỉ số đó lấy mẫu thưa - p99 trên 40 mẫu chỉ là max đội lốt.
+
+    Không làm tròn: latency tính bằng ms cần 2 chữ số, RTF quanh 0.05 thì 2 chữ
+    số là mất sạch thông tin. Nơi hiển thị tự quyết định độ chính xác của mình.
+    """
+    a = np.asarray(values, dtype=float)
+    if not a.size:
+        raise ValueError("không có mẫu nào để tính percentile")
+    p50, p95 = np.percentile(a, [50, 95])
+    return float(p50), float(p95)

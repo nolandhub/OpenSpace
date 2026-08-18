@@ -13,12 +13,6 @@ dl() {  # dl <url> <đích>
   curl -fL --progress-bar "$1" -o "$2"
 }
 
-ASR=https://huggingface.co/hynt/Zipformer-30M-RNNT-6000h/resolve/main
-dl "$ASR/encoder-epoch-20-avg-10.onnx" "$REPO/asr_encoder/1/model.onnx"
-dl "$ASR/decoder-epoch-20-avg-10.onnx" "$REPO/asr_scorer/1/decoder.onnx"
-dl "$ASR/joiner-epoch-20-avg-10.onnx"  "$REPO/asr_scorer/1/joiner.onnx"
-dl "$ASR/bpe.model"                     "$REPO/asr_scorer/1/bpe.model"
-
 # ASR streaming - repo đã export sẵn ONNX fp16 theo từng biến thể chunk.
 # CHUNK_VARIANT đổi được: 16 (latency thấp nhất), 32, 64. Xem spec 2026-08-10 mục 4.
 CHUNK_VARIANT="${CHUNK_VARIANT:-16}"
@@ -40,6 +34,4 @@ VOC=https://huggingface.co/charactr/vocos-mel-24khz/resolve/main
 dl "$VOC/config.yaml"       "$REPO/tts/1/vocos/config.yaml"
 dl "$VOC/pytorch_model.bin" "$REPO/tts/1/vocos/pytorch_model.bin"
 
-# Ensemble không có trọng số nhưng Triton vẫn bắt buộc có thư mục version
-mkdir -p "$REPO/asr/1"
 echo "xong"

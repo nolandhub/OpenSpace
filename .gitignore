@@ -4,13 +4,18 @@
 *.plan
 *.bin
 
-# Kết quả benchmark
-bench/results/*.csv
-bench/results/*.png
+# Kết quả benchmark — chỉ metrics.md được commit
+bench/*/results/*.csv
+bench/*/results/*.png
+bench/*/results/input.json
+
+# Audio/text client sinh ra khi chạy thử, ở gốc repo
+/*.wav
+/*.txt
+!requirements.txt
 
 # Python
 __pycache__/
 *.py[cod]
 .venv/
 .pytest_cache/
-bench/results/export/

@@ -1,34 +1,40 @@
 # Triton Voice Serving
 
-Serving ASR (Zipformer RNN-T) và TTS (ZipVoice) tiếng Việt trên Triton Inference Server.
+ASR streaming (Zipformer RNN-T) và TTS (ZipVoice) tiếng Việt trên một
+[Triton Inference Server](https://docs.nvidia.com/deeplearning/triton-inference-server/user-guide/docs/).
 
-- Thiết kế: `docs/superpowers/specs/2026-08-09-triton-voice-serving-design.md`
-- Kế hoạch triển khai: `docs/superpowers/plans/2026-08-09-triton-voice-serving.md`
-- Thiết kế streaming ASR: `docs/superpowers/specs/2026-08-10-streaming-asr-design.md`
+| model | backend | vào → ra |
+|---|---|---|
+| `asr_streaming` | Python, GPU ×2, sequence batching | chunk audio 16kHz → partial transcript |
+| `tts` | Python, GPU ×1, không batch | text (+ giọng mẫu tuỳ chọn) → waveform 24kHz |
+
+Client dùng gRPC (8001); HTTP (8000) và metrics (8002) cũng mở.
 
 ## Chuẩn bị
 
     python3.12 -m venv .venv && .venv/bin/pip install -r requirements.txt
-    ./scripts/fetch_models.sh          # tải trọng số, chỉ cần 1 lần
-    .venv/bin/python scripts/prepare_assets.py   # audio mẫu tiếng Việt
+    ./scripts/fetch_models.sh        # tải trọng số, chỉ cần 1 lần
+
+`CHUNK_VARIANT=16|32|64 ./scripts/fetch_models.sh` chọn biến thể chunk của encoder
+streaming — 16 là latency thấp nhất, cũng là mặc định.
 
 ## Chạy
 
-    ./scripts/serve.sh                 # dựng image và chạy cả 5 model
-    ./scripts/serve.sh asr_encoder     # chỉ load 1 model, dùng khi debug
+    ./scripts/serve.sh                    # dựng image và load cả 2 model
+    ./scripts/serve.sh asr_streaming      # chỉ load 1 model, dùng khi debug
 
 ## Dùng
 
-    .venv/bin/python client/asr_client.py tests/assets/sample_vi.wav
+    # ASR streaming - partial transcript hiện dần như phụ đề, --fast để gửi dồn
+    .venv/bin/python client/asr_streaming_client.py tests/assets/sample_vi.wav
+
+    # TTS với giọng mẫu đóng gói sẵn
     .venv/bin/python client/tts_client.py --text "Xin chào" --out ra.wav
 
     # TTS clone giọng từ file mẫu bất kỳ
     .venv/bin/python client/tts_client.py --text "Hôm nay trời đẹp." \
         --prompt tests/assets/sample_vi.wav \
         --prompt-text "$(cat tests/assets/sample_vi.txt)" --out clone.wav
-
-    # ASR streaming - partial transcript hiện dần như phụ đề
-    .venv/bin/python client/asr_streaming_client.py tests/assets/sample_vi.wav
 
 ## Test
 
@@ -37,18 +43,19 @@ Serving ASR (Zipformer RNN-T) và TTS (ZipVoice) tiếng Việt trên Triton Inf
 
 ## Benchmark
 
-    # latency mỗi chunk 200ms + RTF, quét 1-4 phiên đồng thời
-    .venv/bin/python bench/stream_bench.py --ccu 1 2 3 4 --duration 60
+    ./scripts/perf.sh asr_streaming                      # p50/90/95/99, throughput, GPU util
+    ./scripts/perf.sh tts
+    .venv/bin/python bench/asr_streaming/metrics.py      # first-chunk latency + WER
+    .venv/bin/python bench/tts/metrics.py                # RTF
 
-Kết quả đã đo và phần phân tích: `bench/README.md`
+perf_analyzer lo mọi chỉ số ở tầng request; `bench/` chỉ chứa cái nó không thấy được.
+Cách đọc kết quả: `bench/README.md`.
 
-## Kiến trúc
+## Tài liệu
 
-    asr (ensemble)
-     ├── asr_feature   Python, CPU ×4      fbank 80 chiều
-     ├── asr_encoder   ONNX, GPU           dynamic batching 5ms
-     └── asr_scorer    Python, GPU ×2      greedy search + decoder/joiner ONNX
-
-    asr_streaming     Python, GPU ×1       sequence batcher; chunk audio → partial transcript
-
-    tts               Python, GPU ×1       espeak-ng vi → ZipVoice → vocos
+| file | nội dung |
+|---|---|
+| `Architect.md` | kiến trúc, flow từng model, nút thắt hiện tại |
+| `docs/ensemble-vs-one-backend.md` | vì sao một Python backend chứ không tách tầng |
+| `bench/README.md` | ranh giới perf_analyzer / script tự viết, kết quả |
+| `docs/superpowers/specs/` | thiết kế gốc và lý do từng quyết định cấu hình |

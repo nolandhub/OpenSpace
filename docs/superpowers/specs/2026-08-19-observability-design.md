@@ -77,7 +77,7 @@ Tên metric dưới đây đã verify trực tiếp trên image đang dùng: Tri
 |---|---|---|---|---|
 | 1 | RPS | `nv_inference_request_success` | `vllm:request_success_total` | sẵn |
 | 2 | Success Rate | success / (success+failure) | — | sẵn |
-| 3 | Error Rate | `nv_inference_request_failure` | `{finished_reason="abort"}` (proxy) | sẵn / hạn chế |
+| 3 | Error Rate | `nv_inference_request_failure{reason}` | `{finished_reason="abort"}` (proxy) | sẵn / hạn chế |
 | 4–6 | p50/95/99 | `nv_inference_request_summary_us{quantile}` | `vllm:e2e_request_latency_seconds_bucket` | **cần flag** |
 | 7 | GPU Util | `nv_gpu_utilization` | — | sẵn |
 | 8 | GPU Mem | `nv_gpu_memory_used_bytes` / `_total_bytes` | — | sẵn |
@@ -154,6 +154,12 @@ class ModelMetrics:
 ```
 
 `instance` lấy từ `args["model_instance_name"]` trong `initialize()`.
+
+**Bắt buộc giữ tham chiếu tới `MetricFamily`.** Stub của Triton ném:
+
+> *Invalid metric operation as the corresponding 'MetricFamily' has been deleted. The 'MetricFamily' object should be deleted AFTER its corresponding 'Metric' objects have been deleted.*
+
+Nên viết `metric_api.MetricFamily(...).Metric(...)` rồi chỉ giữ `Metric` là **sai** — family bị GC, metric thành vô hiệu lúc chạy. `ModelMetrics` phải giữ cả family lẫn metric làm thuộc tính.
 
 ## 6. CCU và bài toán giá trị đóng băng
 
@@ -261,7 +267,17 @@ Nguyên tắc: **chỉ cộng thêm, không sửa luồng inference.**
 
 Không đổi `config.pbtxt`, không đổi `docker/Dockerfile`, không đổi `scripts/serve_llm.sh`.
 
-**Bước 0 của implementation:** dựng server thật, dump `:8002/metrics`, chốt hậu tố tên counter (`nv_inference_request_success` hay `..._total`) **trước khi** viết 30 panel dựa vào nó. Triton viết bằng C++ nên không thêm `_total` như prometheus_client của vLLM — nhưng phải thấy tận mắt.
+**Bước 0 — ĐÃ XONG (2026-08-19).** Dump `:8002/metrics` từ `triton-voice:latest` cho kết quả:
+
+- Counter Triton **không có hậu tố `_total`**: `nv_inference_request_success`, `nv_inference_request_failure`
+- `nv_inference_request_failure` **có thêm label `reason`** — `BACKEND` / `OTHER` / `CANCELED` / `REJECTED`
+- Mọi metric per-model có label `version="1"`
+- GPU metric dùng label **`gpu_uuid`**, không phải chỉ số card
+- Summary ra đúng `quantile="0.5"/"0.95"/"0.99"` với flag ở trên
+
+Label `reason` là chỗ suýt hỏng: `rate(failure) + rate(success)` là cộng hai vector **lệch label**, Prometheus không match được cặp nào và trả rỗng — panel "No data" chứ không phải số sai. Mọi phép tính đụng `failure` phải bọc `sum()` để bỏ `reason` trước. Xem §9.
+
+`CANCELED` đáng ngờ có phải lỗi không — client streaming ngắt kết nối cũng sinh ra nó. Giữ trong tổng lỗi ở bản đầu, nhưng tách một series riêng trong panel để nhìn thấy tỉ trọng.
 
 ## 9. Query và dashboard
 
@@ -283,9 +299,12 @@ nv_inference_request_summary_us{model="$model",quantile="0.99"} / 1000        # 
 sum(voice_ccu{model="$model"} * on(model,instance) (time() - voice_ccu_updated_at < bool 60))
 nv_inference_pending_request_count{model="$model"}
 histogram_quantile(0.95, sum by(le) (rate(voice_rtf_bucket{model="$model"}[5m])))
-rate(nv_inference_request_failure{model="$model"}[1m])
-  / (rate(nv_inference_request_success{model="$model"}[1m])
-     + rate(nv_inference_request_failure{model="$model"}[1m]))
+# sum() bắt buộc: nv_inference_request_failure có label `reason`, không bọc thì
+# phép cộng dưới đây lệch label và trả về rỗng
+sum(rate(nv_inference_request_failure{model="$model"}[1m]))
+  / clamp_min(
+      sum(rate(nv_inference_request_success{model="$model"}[1m]))
+      + sum(rate(nv_inference_request_failure{model="$model"}[1m])), 1e-9)
 ```
 
 **Row LLM**
@@ -299,6 +318,7 @@ vllm:num_requests_waiting        # queue
 
 **Row GPU**
 ```promql
+# label là gpu_uuid; hai metric cùng label nên phép chia match được
 nv_gpu_utilization * 100
 nv_gpu_memory_used_bytes / nv_gpu_memory_total_bytes * 100
 ```
@@ -335,7 +355,8 @@ Ghi ra để người đọc dashboard không hiểu sai, không phải để xi
 |---|---|---|
 | **R1 — Label join sai làm CCU đọc 0** | **Cao** | `on(model, instance)` mà hai family lệch label thì join rỗng → CCU = 0. Sai theo chiều **báo thiếu** và **im lặng**, nguy hiểm hơn báo thừa. Chặn: hai gauge tạo cùng một chỗ, dùng chung một dict labels; `test_serving_metrics.py` assert đúng chuyện đó |
 | **R2 — Số 60 nằm ở 3 nơi** | **Cao** | `config.pbtxt`, `CCU_TTL_S`, PromQL trong dashboard. Lệch nhau là sai âm thầm. Chặn: hằng số về `serving/metrics.py`, `test_monitoring_config.py` assert cả ba khớp |
-| R3 — Tên counter Triton khác dự đoán | Trung bình | Bước 0 mục 8: dump `/metrics` thật trước khi viết panel |
+| R3 — Tên counter Triton khác dự đoán | ~~Trung bình~~ **đã đóng** | Bước 0 đã chạy, kết quả trong §8 |
+| **R8 — MetricFamily bị GC làm Metric vô hiệu** | **Cao** | Không giữ tham chiếu family thì metric chết im lặng lúc chạy, test unit không thấy. Chặn: `ModelMetrics` giữ cả family; test dùng `weakref` + `gc.collect()` khẳng định family còn sống |
 | R4 — Flag `summary_latencies` là experimental | Trung bình | Đã probe chạy đúng trên 25.01, ra đúng `quantile="0.5"/"0.95"/"0.99"`. Nếu bản sau bỏ thì rơi về mean từ counter, panel p-tiles mất — ghi rõ trong doc để không tưởng là hỏng code |
 | R5 — Cổng 9090/3000 bị chiếm | Thấp | `serve_monitoring.sh` kiểm trước, báo lỗi rõ |
 | R6 — Lệch đồng hồ container/host | Thấp | Cùng kernel clock nên không lệch. Nếu sau này tách Prometheus sang máy khác thì query 6.3 hỏng — ghi vào doc |

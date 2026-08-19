@@ -33,7 +33,7 @@
 |---|---|---|
 | `serving/__init__.py` | tạo | đánh dấu package |
 | `serving/metrics.py` | tạo | hằng số TTL, buckets, `rtf()`, `ModelMetrics` — thuần, không import `pb_utils` |
-| `scripts/serve.sh` | sửa | mount `serving/`, bật summary latencies |
+| `scripts/serve_triton.sh` | sửa | mount `serving/`, bật summary latencies |
 | `model_repository/asr_streaming/1/model.py` | sửa | gọi `observe_rtf()` mỗi chunk, `set_ccu()` cuối `execute()` |
 | `model_repository/tts/1/model.py` | sửa | gọi `observe_rtf()` mỗi request, `set_ccu()` vào/ra |
 | `docker/monitoring/prometheus.yml` | tạo | 2 job, scrape 5s |
@@ -377,10 +377,10 @@ asr_streaming; RTF để label chung vì HISTOGRAM observe() cộng dồn đúng
 
 ---
 
-### Task 2: Instrument `asr_streaming` + mount vào `serve.sh`
+### Task 2: Instrument `asr_streaming` + mount vào `serve_triton.sh`
 
 **Files:**
-- Modify: `scripts/serve.sh`
+- Modify: `scripts/serve_triton.sh`
 - Modify: `model_repository/asr_streaming/1/model.py`
 - Test: `tests/test_metrics_endpoint.py`
 
@@ -495,12 +495,12 @@ def test_stream_asr_lam_tang_rtf_count(triton, metrics_text):
 Dựng server hiện tại rồi chạy:
 
 ```bash
-./scripts/serve.sh asr_streaming    # terminal khác, đợi load xong
+./scripts/serve_triton.sh asr_streaming    # terminal khác, đợi load xong
 .venv/bin/pytest tests/test_metrics_endpoint.py -v
 ```
 Expected: FAIL — `test_summary_latency_duoc_bat` và các test `voice_*` đều đỏ (chưa có flag, chưa có metric)
 
-- [ ] **Step 3: Sửa `scripts/serve.sh`**
+- [ ] **Step 3: Sửa `scripts/serve_triton.sh`**
 
 Thêm mount `serving/` — đặt ngay dưới dòng mount `model_repository`:
 
@@ -574,7 +574,7 @@ return responses
 - [ ] **Step 5: Chạy lại test**
 
 ```bash
-./scripts/serve.sh asr_streaming     # dựng lại để nạp flag + mount mới
+./scripts/serve_triton.sh asr_streaming     # dựng lại để nạp flag + mount mới
 .venv/bin/pytest tests/test_metrics_endpoint.py -v
 ```
 Expected: PASS toàn bộ (test `voice_ccu` của tts sẽ chưa có — Task 3)
@@ -589,10 +589,10 @@ Expected: throughput vẫn quanh 138 infer/s (`bench/asr_streaming/README.md`). 
 - [ ] **Step 7: Commit**
 
 ```bash
-git add scripts/serve.sh model_repository/asr_streaming/1/model.py tests/test_metrics_endpoint.py
+git add scripts/serve_triton.sh model_repository/asr_streaming/1/model.py tests/test_metrics_endpoint.py
 git commit -m "Instrument asr_streaming: voice_rtf per chunk, voice_ccu per instance
 
-serve.sh mount serving/ vào /opt/serving/serving để import trong container
+serve_triton.sh mount serving/ vào /opt/serving/serving để import trong container
 giống hệt trong test, và bật summary_latencies - mặc định chỉ có counter
 cộng dồn nên chỉ tính ra được mean chứ không có p50/95/99."
 ```
@@ -653,7 +653,7 @@ def test_tts_ccu_ve_0_khi_ranh(triton, metrics_text):
 - [ ] **Step 2: Chạy để xác nhận đỏ**
 
 ```bash
-./scripts/serve.sh                   # cả 2 model
+./scripts/serve_triton.sh                   # cả 2 model
 .venv/bin/pytest tests/test_metrics_endpoint.py -k tts -v
 ```
 Expected: FAIL — `voice_ccu{model="tts"}` chưa tồn tại
@@ -727,7 +727,7 @@ self.metrics.observe_rtf(time.perf_counter() - t0, len(wav) / SAMPLING_RATE)
 - [ ] **Step 4: Chạy lại test**
 
 ```bash
-./scripts/serve.sh
+./scripts/serve_triton.sh
 .venv/bin/pytest tests/test_metrics_endpoint.py -v
 ```
 Expected: PASS toàn bộ
@@ -922,7 +922,7 @@ echo "Prometheus  http://localhost:9090/targets"
 echo "Grafana     http://localhost:3000"
 echo
 echo "Triton và vLLM phải chạy sẵn thì target mới UP:"
-echo "  ./scripts/serve.sh  &&  ./scripts/serve_llm.sh"
+echo "  ./scripts/serve_triton.sh  &&  ./scripts/serve_llm.sh"
 ```
 
 Rồi: `chmod +x scripts/serve_monitoring.sh`
@@ -1334,7 +1334,7 @@ Expected: PASS toàn bộ
 - [ ] **Step 6: Xác nhận bằng mắt trên Grafana thật**
 
 ```bash
-./scripts/serve.sh                       # terminal 1
+./scripts/serve_triton.sh                       # terminal 1
 ./scripts/serve_llm.sh                   # terminal 2, sau khi Triton load xong
 ./scripts/serve_monitoring.sh            # terminal 3
 .venv/bin/python client/asr_streaming_client.py tests/assets/sample_vi.wav
@@ -1380,7 +1380,7 @@ Thiết kế và lý do từng quyết định: `superpowers/specs/2026-08-19-ob
 
 ## Chạy
 
-    ./scripts/serve.sh              # Triton trước
+    ./scripts/serve_triton.sh              # Triton trước
     ./scripts/serve_llm.sh          # rồi vLLM
     ./scripts/serve_monitoring.sh   # Prometheus 9090 + Grafana 3000
 
@@ -1441,8 +1441,8 @@ Sửa thẳng trong UI Grafana sẽ bị ghi đè (`allowUiUpdates: false`).
 
 | Triệu chứng | Nguyên nhân |
 |---|---|
-| Panel p50/95/99 trống | `serve.sh` thiếu `--metrics-config summary_latencies=true` |
-| Panel `voice_*` trống | `serve.sh` thiếu mount `serving/` vào `/opt/serving/serving` |
+| Panel p50/95/99 trống | `serve_triton.sh` thiếu `--metrics-config summary_latencies=true` |
+| Panel `voice_*` trống | `serve_triton.sh` thiếu mount `serving/` vào `/opt/serving/serving` |
 | CCU luôn bằng 0 | join `on(model, instance)` hỏng — hai gauge lệch label |
 | Target `vllm` DOWN | chưa chạy `serve_llm.sh`, hoặc `PORT` khác 8080 |
 | `serve_monitoring.sh` báo cổng bị chiếm | 9090/3000 đang có tiến trình khác |

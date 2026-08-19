@@ -16,17 +16,12 @@ OUT = Path(__file__).parent / "grafana" / "dashboards" / "voice-serving.json"
 # Instance nào không được chạm trong CCU_TTL_S giây thì nhân 0. Mô phỏng đúng
 # cái _sweep() sẽ làm nếu nó được chạy - xem spec §6.
 #
-# Join theo exported_instance chứ không phải instance: label gốc của
-# voice_ccu/voice_ccu_updated_at tên là "instance" (spec §5.3), nhưng
-# Prometheus scrape target cũng gắn sẵn label "instance" = địa chỉ target
-# (localhost:8002). Đụng tên, honor_labels mặc định false (prometheus.yml
-# không bật) nên Prometheus đổi tên label gốc thành "exported_instance" và
-# ghi đè "instance" bằng địa chỉ target. Join trên "instance" thì mọi
-# instance model cùng chung một giá trị "localhost:8002" -> many-to-many,
-# Prometheus trả lỗi "duplicate series" (đã xác nhận qua :9090/api/v1/query).
+# Join theo model_instance chứ không phải instance: label "instance" bị
+# Prometheus chiếm riêng cho địa chỉ target lúc scrape, nên serving/metrics.py
+# phát label tự phát dưới tên "model_instance" để không đụng.
 def ccu(selector: str) -> str:
     return (
-        f"sum(voice_ccu{selector} * on(model, exported_instance) "
+        f"sum(voice_ccu{selector} * on(model, model_instance) "
         f"(time() - voice_ccu_updated_at < bool {CCU_TTL_S:g}))"
     )
 

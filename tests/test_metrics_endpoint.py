@@ -48,17 +48,19 @@ def test_asr_co_metric_tu_phat(metrics_text):
 
 
 @pytest.mark.integration
-def test_ccu_co_label_instance_tren_server_that(metrics_text):
-    """asr_streaming có count: 2 - thiếu label instance là 2 process ghi đè nhau."""
+def test_ccu_co_label_model_instance_tren_server_that(metrics_text):
+    """asr_streaming có count: 2 - thiếu label model_instance là 2 process ghi đè nhau."""
     lines = [l for l in metrics_text.splitlines() if l.startswith("voice_ccu{")]
     assert lines, "không có sample voice_ccu nào"
-    assert all("instance=" in l for l in lines), lines
+    assert all("model_instance=" in l for l in lines), lines
 
 
 @pytest.mark.integration
 def test_rtf_khong_co_label_instance_tren_server_that(metrics_text):
     lines = [l for l in metrics_text.splitlines() if l.startswith("voice_rtf_bucket{")]
     assert lines, "không có sample voice_rtf_bucket nào"
+    # "model_instance=" cũng chứa chuỗi con "instance=" nên kiểm cả hai dạng -
+    # voice_rtf không được có label instance dưới bất kỳ tên nào.
     assert not any("instance=" in l for l in lines), lines
 
 

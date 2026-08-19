@@ -150,7 +150,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(voice_ccu * on(model, exported_instance) (time() - voice_ccu_updated_at < bool 60)) + sum(vllm:num_requests_running)",
+          "expr": "sum(voice_ccu * on(model, model_instance) (time() - voice_ccu_updated_at < bool 60)) + sum(vllm:num_requests_running)",
           "refId": "A",
           "legendFormat": "{{model}}{{instance}}{{quantile}}"
         }
@@ -277,7 +277,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(voice_ccu{model=\"asr_streaming\"} * on(model, exported_instance) (time() - voice_ccu_updated_at < bool 60))",
+          "expr": "sum(voice_ccu{model=\"asr_streaming\"} * on(model, model_instance) (time() - voice_ccu_updated_at < bool 60))",
           "refId": "A",
           "legendFormat": "{{model}}{{instance}}{{quantile}}"
         }
@@ -518,7 +518,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(voice_ccu{model=\"tts\"} * on(model, exported_instance) (time() - voice_ccu_updated_at < bool 60))",
+          "expr": "sum(voice_ccu{model=\"tts\"} * on(model, model_instance) (time() - voice_ccu_updated_at < bool 60))",
           "refId": "A",
           "legendFormat": "{{model}}{{instance}}{{quantile}}"
         }

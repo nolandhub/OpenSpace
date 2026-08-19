@@ -54,7 +54,11 @@ class ModelMetrics:
         # CCU thì ngược lại. GAUGE set() với label chung sẽ ghi đè giữa các
         # instance, giá trị cuối là của process nào chạy sau. asr_streaming có
         # count: 2 nên đây là ca thật. Tách theo instance, cộng lại ở PromQL.
-        ccu_labels = {"model": model, "instance": instance}
+        #
+        # Tên label là "model_instance" chứ không phải "instance": Prometheus
+        # tự gắn label "instance" = địa chỉ target vào mọi metric lúc scrape,
+        # đụng tên với label tự phát này thì bị ghi đè mất giá trị thật.
+        ccu_labels = {"model": model, "model_instance": instance}
         self._ccu_family = family(
             name="voice_ccu",
             description="Số phiên đang sống trên một model instance",

@@ -117,19 +117,21 @@ def test_rtf_khong_co_label_instance(tts_metrics):
     assert metric.labels == {"model": "tts"}
 
 
-def test_ccu_co_label_instance(tts_metrics):
+def test_ccu_co_label_model_instance(tts_metrics):
     """GAUGE set() dùng label chung thì 2 instance ghi đè nhau - CCU sẽ sai.
 
-    asr_streaming có count: 2 nên đây là ca thật, không phải giả định.
+    asr_streaming có count: 2 nên đây là ca thật, không phải giả định. Tên
+    label là "model_instance" chứ không phải "instance" - Prometheus tự
+    chiếm tên "instance" cho địa chỉ target lúc scrape.
     """
     _, families = tts_metrics
     for name in ("voice_ccu", "voice_ccu_updated_at"):
         (metric,) = families[name].metrics
-        assert metric.labels == {"model": "tts", "instance": "tts_0_0"}
+        assert metric.labels == {"model": "tts", "model_instance": "tts_0_0"}
 
 
 def test_hai_gauge_ccu_cung_label(tts_metrics):
-    """PromQL join `on(model, instance)` - lệch label thì join rỗng, CCU đọc 0."""
+    """PromQL join `on(model, model_instance)` - lệch label thì join rỗng, CCU đọc 0."""
     _, families = tts_metrics
     assert families["voice_ccu"].metrics[0].labels == (
         families["voice_ccu_updated_at"].metrics[0].labels

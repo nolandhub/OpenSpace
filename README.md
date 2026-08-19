@@ -20,8 +20,8 @@ streaming — 16 là latency thấp nhất, cũng là mặc định.
 
 ## Chạy
 
-    ./scripts/serve.sh                    # dựng image và load cả 2 model
-    ./scripts/serve.sh asr_streaming      # chỉ load 1 model, dùng khi debug
+    ./scripts/serve_triton.sh             # dựng image và load cả 2 model
+    ./scripts/serve_triton.sh asr_streaming   # chỉ load 1 model, dùng khi debug
 
 ## Dùng
 
@@ -51,11 +51,23 @@ streaming — 16 là latency thấp nhất, cũng là mặc định.
 perf_analyzer lo mọi chỉ số ở tầng request; `bench/` chỉ chứa cái nó không thấy được.
 Cách đọc kết quả: `bench/README.md`.
 
+## Monitoring
+
+    ./scripts/serve_monitoring.sh        # Prometheus 9090 + Grafana 3000
+
+Grafana `http://localhost:3000` → dashboard **Voice Serving**: RPS, p50/95/99,
+CCU, queue depth, RTF, TTFT/TPOT, GPU, error rate cho cả ASR, TTS và LLM.
+Triton và vLLM phải chạy trước thì target mới UP.
+
+RTF và CCU do `serving/metrics.py` tự phát — Triton không biết audio dài bao
+nhiêu, cũng không biết bao nhiêu phiên đang sống. Cách đọc: `docs/observability.md`.
+
 ## Tài liệu
 
 | file | nội dung |
 |---|---|
 | `Architect.md` | kiến trúc, flow từng model, nút thắt hiện tại |
 | `docs/ensemble-vs-one-backend.md` | vì sao một Python backend chứ không tách tầng |
+| `docs/observability.md` | cách chạy monitoring, cách đọc từng chỉ số, giới hạn |
 | `bench/README.md` | ranh giới perf_analyzer / script tự viết, kết quả |
 | `docs/superpowers/specs/` | thiết kế gốc và lý do từng quyết định cấu hình |

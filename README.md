@@ -10,6 +10,9 @@ ASR streaming (Zipformer RNN-T) và TTS (ZipVoice) tiếng Việt trên một
 
 Client dùng gRPC (8001); HTTP (8000) và metrics (8002) cũng mở.
 
+LLM chạy **server riêng** — vLLM với API OpenAI-compatible ở cổng 8080, không nằm
+trong `model_repository`. Lý do: [`docs/llm-serving.md`](docs/llm-serving.md).
+
 ## Chuẩn bị
 
     python3.12 -m venv .venv && .venv/bin/pip install -r requirements.txt
@@ -20,8 +23,12 @@ streaming — 16 là latency thấp nhất, cũng là mặc định.
 
 ## Chạy
 
-    ./scripts/serve_triton.sh             # dựng image và load cả 2 model
-    ./scripts/serve_triton.sh asr_streaming   # chỉ load 1 model, dùng khi debug
+    ./scripts/serve_triton.sh                    # dựng image và load cả 2 model
+    ./scripts/serve_triton.sh asr_streaming      # chỉ load 1 model, dùng khi debug
+    ./scripts/serve_llm.sh                # vLLM ở cổng 8080 — chạy SAU khi Triton load xong
+
+Thứ tự bắt buộc: vLLM đo VRAM trống lúc khởi động rồi giữ luôn, dựng trước Triton là
+Triton chết giữa request. `MODEL=` đổi model, `GPU_FRACTION=` đổi phần VRAM xin.
 
 ## Dùng
 
@@ -30,6 +37,13 @@ streaming — 16 là latency thấp nhất, cũng là mặc định.
 
     # TTS với giọng mẫu đóng gói sẵn
     .venv/bin/python client/tts_client.py --text "Xin chào" --out ra.wav
+
+    # LLM - in dần từng token, --no-think tắt reasoning của Qwen3
+    .venv/bin/python client/llm_client.py --prompt "Thủ đô Việt Nam là gì?" --no-think
+
+    # LLM hội thoại nhiều lượt - giữ ngữ cảnh, tự cắt lịch sử cho vừa cửa sổ
+    .venv/bin/python client/llm_client.py --chat --no-think \
+        --system "Trả lời ngắn gọn bằng tiếng Việt."
 
     # TTS clone giọng từ file mẫu bất kỳ
     .venv/bin/python client/tts_client.py --text "Hôm nay trời đẹp." \
@@ -68,6 +82,7 @@ nhiêu, cũng không biết bao nhiêu phiên đang sống. Cách đọc: `docs/
 |---|---|
 | `Architect.md` | kiến trúc, flow từng model, nút thắt hiện tại |
 | `docs/ensemble-vs-one-backend.md` | vì sao một Python backend chứ không tách tầng |
+| `docs/llm-serving.md` | vì sao vLLM đứng riêng, và Thor đổi gì |
 | `docs/observability.md` | cách chạy monitoring, cách đọc từng chỉ số, giới hạn |
 | `bench/README.md` | ranh giới perf_analyzer / script tự viết, kết quả |
 | `docs/superpowers/specs/` | thiết kế gốc và lý do từng quyết định cấu hình |

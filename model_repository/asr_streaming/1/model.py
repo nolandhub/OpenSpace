@@ -21,10 +21,14 @@ from streaming_search import (  # noqa: E402
     init_search_state,
 )
 
+sys.path.insert(0, "/opt/serving")
+from serving.metrics import ASR_RTF_BUCKETS, ModelMetrics  # noqa: E402
+
 BLANK_ID = 0
 CONTEXT_SIZE = 2
 LOG_EPS = math.log(1e-10)   # giá trị đệm khung cuối, theo quy ước icefall/sherpa
 STATE_TTL_S = 60.0          # soi gương max_sequence_idle_microseconds trong config.pbtxt
+SAMPLE_RATE = 16000          # mẫu số của RTF; khớp fbank và client
 
 _ORT_TO_NP = {
     "tensor(float)": np.float32,
@@ -82,6 +86,9 @@ class TritonPythonModel:
         self.joiner_dtype = _ORT_TO_NP[self.joiner.get_inputs()[0].type]
 
         self.streams = {}   # corrid -> _Stream
+        self.metrics = ModelMetrics(
+            pb_utils, "asr_streaming", args["model_instance_name"], ASR_RTF_BUCKETS
+        )
 
     def run_decoder(self, context):
         y = np.array([context], dtype=np.int64)
@@ -162,12 +169,16 @@ class TritonPythonModel:
             .reshape(-1)
             .astype(np.float32)
         )
+        t0 = time.perf_counter()
         new_feat = stream.fbank.accept_waveform(audio)
         if end:
             tail = stream.fbank.flush()
             if len(tail):
                 new_feat = np.concatenate([new_feat, tail]) if len(new_feat) else tail
         self._advance(stream, new_feat, flush=end)
+        # Chunk rỗng (END không kèm audio) là hợp lệ - bỏ qua thay vì chia cho 0.
+        if len(audio):
+            self.metrics.observe_rtf(time.perf_counter() - t0, len(audio) / SAMPLE_RATE)
 
         text = self.sp.decode(emitted_tokens(stream.search, CONTEXT_SIZE))
         if end:
@@ -188,4 +199,6 @@ class TritonPythonModel:
                 responses.append(
                     pb_utils.InferenceResponse(error=pb_utils.TritonError(str(e)))
                 )
+        # Sau vòng lặp: chunk có END đã xoá state của nó, số này mới đúng.
+        self.metrics.set_ccu(len(self.streams))
         return responses

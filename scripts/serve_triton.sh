@@ -7,7 +7,11 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
 docker build -t triton-voice -f "$ROOT/docker/Dockerfile" "$ROOT/docker"
 
-ARGS=(--model-repository=/models)
+# Mặc định Triton chỉ phơi counter cộng dồn, từ đó chỉ tính ra được MEAN latency.
+# summary_latencies cho quantile thật; quantile viết kèm sai số cho phép.
+ARGS=(--model-repository=/models
+      --metrics-config summary_latencies=true
+      --metrics-config 'summary_quantiles=0.5:0.05,0.95:0.01,0.99:0.001')
 if [ $# -gt 0 ]; then
   # Chế độ explicit: chỉ load đúng model được chỉ định, tiện lúc debug
   ARGS+=(--model-control-mode=explicit)
@@ -21,4 +25,5 @@ TTY=()
 docker run --gpus all --rm "${TTY[@]}" --net host --shm-size 1g \
   --name triton-voice-server \
   -v "$ROOT/model_repository:/models" \
+  -v "$ROOT/serving:/opt/serving/serving:ro" \
   triton-voice tritonserver "${ARGS[@]}"

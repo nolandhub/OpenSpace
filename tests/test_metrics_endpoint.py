@@ -95,3 +95,41 @@ def test_stream_asr_lam_tang_rtf_count(triton, metrics_text):
         if l.startswith("voice_ccu{") and 'model="asr_streaming"' in l
     )
     assert ccu == 0, f"stream đã END mà CCU vẫn {ccu}"
+
+
+@pytest.mark.integration
+def test_tts_co_metric_tu_phat(metrics_text):
+    assert _sample(metrics_text, "voice_ccu", model="tts") is not None
+    assert _sample(metrics_text, "voice_rtf_bucket", model="tts", le="1") is not None
+
+
+@pytest.mark.integration
+def test_tts_rtf_tang_sau_mot_cau(triton):
+    """RTF đo trong execute() nên KHÔNG có RTT gRPC - thấp hơn bench/tts một chút.
+
+    Ở đây chỉ khẳng định nó có ghi nhận, không so số với bench.
+    """
+    import numpy as np
+    import tritonclient.grpc as grpcclient
+
+    before = _sample(scrape(), "voice_rtf_count", model="tts") or 0.0
+
+    # max_batch_size: 0 trong config.pbtxt của tts nên KHÔNG có chiều batch,
+    # khác asr_streaming - cùng quy ước với bench/tts/metrics.py.
+    inp = grpcclient.InferInput("TEXT", [1], "BYTES")
+    inp.set_data_from_numpy(np.array(["Xin chào".encode("utf-8")], dtype=object))
+    triton.infer("tts", [inp])
+
+    after = _sample(scrape(), "voice_rtf_count", model="tts") or 0.0
+    assert after > before, f"voice_rtf_count của tts không tăng: {before} -> {after}"
+
+
+@pytest.mark.integration
+def test_tts_ccu_ve_0_khi_ranh(triton, metrics_text):
+    """execute() set 0 trong finally - xong request là phải về 0."""
+    total = sum(
+        float(l.rsplit(" ", 1)[1])
+        for l in metrics_text.splitlines()
+        if l.startswith("voice_ccu{") and 'model="tts"' in l
+    )
+    assert total == 0, f"tts rảnh mà CCU vẫn {total}"

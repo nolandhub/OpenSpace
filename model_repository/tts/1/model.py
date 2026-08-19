@@ -3,6 +3,8 @@
 
 import json
 import os
+import sys
+import time
 import uuid
 
 import numpy as np
@@ -15,6 +17,9 @@ from zipvoice.models.zipvoice_distill import ZipVoiceDistill
 from zipvoice.tokenizer.tokenizer import EspeakTokenizer
 from zipvoice.utils.checkpoint import load_checkpoint
 from zipvoice.utils.feature import VocosFbank
+
+sys.path.insert(0, "/opt/serving")
+from serving.metrics import TTS_RTF_BUCKETS, ModelMetrics  # noqa: E402
 
 SAMPLING_RATE = 24000
 PROMPT_SAMPLE_RATE = 16000
@@ -63,6 +68,10 @@ class TritonPythonModel:
         ) as f:
             self.default_prompt_text = f.read().strip()
 
+        self.metrics = ModelMetrics(
+            pb_utils, "tts", args["model_instance_name"], TTS_RTF_BUCKETS
+        )
+
     @staticmethod
     def _get_optional(request, name, default=None):
         """Đọc input tuỳ chọn - client không gửi thì trả về giá trị mặc định."""
@@ -71,78 +80,87 @@ class TritonPythonModel:
 
     def execute(self, requests):
         responses = []
-
-        for request in requests:
-            text = self._get_optional(request, "TEXT")[0].decode("utf-8")
-            num_step = int(
-                self._get_optional(
-                    request, "NUM_STEPS", np.array([self.default_num_step])
-                )[0]
-            )
-            # speed < 1 đọc chậm lại, > 1 đọc nhanh hơn
-            speed = float(
-                self._get_optional(request, "SPEED", np.array([1.0], dtype=np.float32))[0]
-            )
-            # guidance_scale cao thì bám ngữ điệu của giọng mẫu chặt hơn
-            guidance_scale = float(
-                self._get_optional(
-                    request,
-                    "GUIDANCE_SCALE",
-                    np.array([self.guidance_scale], dtype=np.float32),
-                )[0]
-            )
-
-            prompt_wav_array = self._get_optional(request, "PROMPT_WAV")
-            prompt_text_array = self._get_optional(request, "PROMPT_TEXT")
-
-            tmp_files = []
-            if prompt_wav_array is not None:
-                # Client gửi giọng mẫu riêng - ghi ra tmpfs vì ZipVoice nhận đường dẫn
-                prompt_wav = f"{TMP_DIR}/prompt_{uuid.uuid4().hex}.wav"
-                sf.write(
-                    prompt_wav, prompt_wav_array.reshape(-1), PROMPT_SAMPLE_RATE
+        self.metrics.set_ccu(len(requests))
+        try:
+            for request in requests:
+                text = self._get_optional(request, "TEXT")[0].decode("utf-8")
+                num_step = int(
+                    self._get_optional(
+                        request, "NUM_STEPS", np.array([self.default_num_step])
+                    )[0]
                 )
-                tmp_files.append(prompt_wav)
-                prompt_text = prompt_text_array[0].decode("utf-8")
-            else:
-                prompt_wav = self.default_prompt_wav
-                prompt_text = self.default_prompt_text
+                # speed < 1 đọc chậm lại, > 1 đọc nhanh hơn
+                speed = float(
+                    self._get_optional(request, "SPEED", np.array([1.0], dtype=np.float32))[0]
+                )
+                # guidance_scale cao thì bám ngữ điệu của giọng mẫu chặt hơn
+                guidance_scale = float(
+                    self._get_optional(
+                        request,
+                        "GUIDANCE_SCALE",
+                        np.array([self.guidance_scale], dtype=np.float32),
+                    )[0]
+                )
 
-            out_path = f"{TMP_DIR}/tts_{uuid.uuid4().hex}.wav"
-            tmp_files.append(out_path)
+                prompt_wav_array = self._get_optional(request, "PROMPT_WAV")
+                prompt_text_array = self._get_optional(request, "PROMPT_TEXT")
 
-            try:
-                with torch.inference_mode():
-                    generate_sentence(
-                        save_path=out_path,
-                        prompt_text=prompt_text,
-                        prompt_wav=prompt_wav,
-                        text=text,
-                        model=self.model,
-                        vocoder=self.vocoder,
-                        tokenizer=self.tokenizer,
-                        feature_extractor=self.feature_extractor,
-                        device=self.device,
-                        num_step=num_step,
-                        guidance_scale=guidance_scale,
-                        speed=speed,
-                        sampling_rate=SAMPLING_RATE,
+                tmp_files = []
+                if prompt_wav_array is not None:
+                    # Client gửi giọng mẫu riêng - ghi ra tmpfs vì ZipVoice nhận đường dẫn
+                    prompt_wav = f"{TMP_DIR}/prompt_{uuid.uuid4().hex}.wav"
+                    sf.write(
+                        prompt_wav, prompt_wav_array.reshape(-1), PROMPT_SAMPLE_RATE
                     )
-                wav, _ = sf.read(out_path, dtype="float32")
-            finally:
-                for path in tmp_files:
-                    if os.path.exists(path):
-                        os.remove(path)
+                    tmp_files.append(prompt_wav)
+                    prompt_text = prompt_text_array[0].decode("utf-8")
+                else:
+                    prompt_wav = self.default_prompt_wav
+                    prompt_text = self.default_prompt_text
 
-            responses.append(
-                pb_utils.InferenceResponse(
-                    output_tensors=[
-                        pb_utils.Tensor("WAV", wav.reshape(-1).astype(np.float32)),
-                        pb_utils.Tensor(
-                            "SAMPLE_RATE", np.array([SAMPLING_RATE], dtype=np.int32)
-                        ),
-                    ]
+                out_path = f"{TMP_DIR}/tts_{uuid.uuid4().hex}.wav"
+                tmp_files.append(out_path)
+
+                t0 = time.perf_counter()
+                try:
+                    with torch.inference_mode():
+                        generate_sentence(
+                            save_path=out_path,
+                            prompt_text=prompt_text,
+                            prompt_wav=prompt_wav,
+                            text=text,
+                            model=self.model,
+                            vocoder=self.vocoder,
+                            tokenizer=self.tokenizer,
+                            feature_extractor=self.feature_extractor,
+                            device=self.device,
+                            num_step=num_step,
+                            guidance_scale=guidance_scale,
+                            speed=speed,
+                            sampling_rate=SAMPLING_RATE,
+                        )
+                    wav, _ = sf.read(out_path, dtype="float32")
+                finally:
+                    for path in tmp_files:
+                        if os.path.exists(path):
+                            os.remove(path)
+                # Cùng công thức bench/tts/metrics.py nhưng đo trong execute() nên
+                # không tính RTT gRPC - số ở đây thấp hơn bench một chút, đó là
+                # đúng chứ không phải lệch.
+                self.metrics.observe_rtf(time.perf_counter() - t0, len(wav) / SAMPLING_RATE)
+
+                responses.append(
+                    pb_utils.InferenceResponse(
+                        output_tensors=[
+                            pb_utils.Tensor("WAV", wav.reshape(-1).astype(np.float32)),
+                            pb_utils.Tensor(
+                                "SAMPLE_RATE", np.array([SAMPLING_RATE], dtype=np.int32)
+                            ),
+                        ]
+                    )
                 )
-            )
-            
+        finally:
+            # finally chứ không phải cuối hàm: request lỗi giữa chừng mà không
+            # về 0 thì gauge treo mãi ở giá trị cũ.
+            self.metrics.set_ccu(0)
         return responses

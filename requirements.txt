@@ -5,3 +5,4 @@ pytest==8.3.4
 onnx==1.17.0
 scipy==1.14.1
 perf-analyzer==2.60.0
+PyYAML==6.0.2

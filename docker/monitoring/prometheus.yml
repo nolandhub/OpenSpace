@@ -1,0 +1,17 @@
+# ABOUTME: Scrape config - Triton :8002 và vLLM :8080, cả hai qua localhost
+# ABOUTME: Chạy network_mode host nên localhost ở đây là host thật
+
+global:
+  # 5s chứ không phải 15s mặc định: voice_ccu và nv_inference_pending_request_count
+  # là gauge tức thời, 15s là trượt mất đúng cái spike cần nhìn.
+  scrape_interval: 5s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: triton
+    static_configs:
+      - targets: ["localhost:8002"]
+
+  - job_name: vllm
+    static_configs:
+      - targets: ["localhost:8080"]

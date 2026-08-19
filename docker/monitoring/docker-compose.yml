@@ -1,0 +1,38 @@
+# ABOUTME: Prometheus + Grafana cho stack voice serving, dựng độc lập với Triton/vLLM
+# ABOUTME: Dùng: ./scripts/serve_monitoring.sh
+
+services:
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: triton-voice-prometheus
+    restart: unless-stopped
+    # host network vì Triton chạy --net host, :8002 không thấy được từ bridge.
+    # Bridge sẽ phải dựa vào host.docker.internal - thêm một lớp hỏng được mà
+    # không đổi lại gì.
+    network_mode: host
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=15d
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: triton-voice-grafana
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    environment:
+      # Máy dev một người dùng - bắt đăng nhập chỉ tổ vướng.
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+      GF_AUTH_DISABLE_LOGIN_FORM: "true"
+
+volumes:
+  prometheus-data:
+  grafana-data:

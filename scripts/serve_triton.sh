@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ABOUTME: Build image rồi chạy Triton server với model_repository của project
-# ABOUTME: Truyền tên model vào để chỉ load riêng model đó, ví dụ: ./scripts/serve.sh asr_streaming
+# ABOUTME: Truyền tên model vào để chỉ load riêng model đó, ví dụ: ./scripts/serve_triton.sh asr_streaming
 
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"

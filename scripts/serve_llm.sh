@@ -6,7 +6,7 @@ set -euo pipefail
 
 MODEL=${MODEL:-Qwen/Qwen3-0.6B}
 PORT=${PORT:-8080}
-IMAGE=${IMAGE:-vllm/vllm-openai:latest}
+IMAGE=${IMAGE:-vllm/vllm-openai:v0.27.1}
 GPU_FRACTION=${GPU_FRACTION:-0.5}
 MAX_MODEL_LEN=${MAX_MODEL_LEN:-2048}
 MAX_NUM_SEQS=${MAX_NUM_SEQS:-4}

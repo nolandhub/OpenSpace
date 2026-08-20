@@ -55,6 +55,7 @@ def triton_rows(model: str) -> list:
 
 
 LLM_E2E = "rate(vllm:e2e_request_latency_seconds_bucket[5m])"
+
 ROWS = [
     (
         "OVERVIEW",

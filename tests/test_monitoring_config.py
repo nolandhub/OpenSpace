@@ -140,3 +140,34 @@ def test_phu_du_14_chi_so(dashboard):
     for keyword in ("rps", "success", "error", "p50", "p95", "p99",
                     "gpu util", "gpu mem", "queue", "ccu", "rtf", "ttft", "tpot"):
         assert keyword in titles, f"thiếu panel cho: {keyword}"
+
+
+# Tag phải cố định. `:latest` là con trỏ di động - image đổi dưới chân mà
+# git diff trống, không bisect được. Riêng vLLM còn ràng chặt hơn: KNOWN_METRICS
+# ở trên chốt theo source 0.27.1, vLLM tự nâng cấp thì panel LLM trống lặng lẽ.
+PINNED_IMAGES = {
+    "prom/prometheus": "v3.14.0",
+    "grafana/grafana": "13.2.0",
+    "vllm/vllm-openai": "v0.27.1",
+}
+
+
+def test_compose_pin_image_tag():
+    compose = yaml.safe_load((MON / "docker-compose.yml").read_text())
+    for name, svc in compose["services"].items():
+        repo, _, tag = svc["image"].rpartition(":")
+        assert repo in PINNED_IMAGES, f"{name}: image lạ {svc['image']!r}"
+        assert tag == PINNED_IMAGES[repo], (
+            f"{name}: tag {tag!r} lệch PINNED_IMAGES ({PINNED_IMAGES[repo]!r})"
+        )
+
+
+def test_serve_llm_pin_image_tag():
+    """Mặc định của $IMAGE phải là tag chốt, không phải :latest."""
+    src = (ROOT / "scripts" / "serve_llm.sh").read_text()
+    found = re.search(r"^IMAGE=\$\{IMAGE:-(\S+)\}", src, re.M)
+    assert found, "không tìm thấy dòng gán mặc định IMAGE trong serve_llm.sh"
+    repo, _, tag = found.group(1).rpartition(":")
+    assert tag == PINNED_IMAGES[repo], (
+        f"serve_llm.sh dùng {tag!r}, PINNED_IMAGES chốt {PINNED_IMAGES[repo]!r}"
+    )

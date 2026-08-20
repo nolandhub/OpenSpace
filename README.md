@@ -69,8 +69,13 @@ Cách đọc kết quả: `bench/README.md`.
 
     ./scripts/serve_monitoring.sh        # Prometheus 9090 + Grafana 3000
 
-Grafana `http://localhost:3000` → dashboard **Voice Serving**: RPS, p50/95/99,
-CCU, queue depth, RTF, TTFT/TPOT, GPU, error rate cho cả ASR, TTS và LLM.
+Grafana `http://localhost:3000`, hai dashboard:
+
+- **Voice Serving** — view sản phẩm: RPS, p50/95/99, CCU, queue depth, RTF,
+  TTFT/TPOT, GPU, error rate cho cả ASR, TTS và LLM.
+- **Triton** — view nội tại server: latency tách thành queue / compute_input /
+  compute_infer / compute_output, batch size thực tế, CPU và GPU của Triton.
+
 Triton và vLLM phải chạy trước thì target mới UP.
 
 RTF và CCU do `serving/metrics.py` tự phát — Triton không biết audio dài bao
